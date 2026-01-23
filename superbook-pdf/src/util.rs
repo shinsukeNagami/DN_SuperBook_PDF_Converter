@@ -183,8 +183,8 @@ mod tests {
         assert_eq!(format_file_size(500), "500 B");
         assert_eq!(format_file_size(1024), "1.00 KB");
         assert_eq!(format_file_size(1536), "1.50 KB");
-        assert_eq!(format_file_size(1048576), "1.00 MB");
-        assert_eq!(format_file_size(1073741824), "1.00 GB");
+        assert_eq!(format_file_size(1_048_576), "1.00 MB");
+        assert_eq!(format_file_size(1_073_741_824), "1.00 GB");
     }
 
     #[test]
