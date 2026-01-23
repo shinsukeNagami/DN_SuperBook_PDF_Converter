@@ -1151,9 +1151,8 @@ mod tests {
     fn test_margin_options_default() {
         let options = MarginOptions::default();
 
-        // Verify reasonable defaults
+        // Verify reasonable defaults (background_threshold is u8, always <= 255)
         assert!(options.background_threshold > 0);
-        assert!(options.background_threshold <= 255);
     }
 
     // Test TrimResult fields and consistency

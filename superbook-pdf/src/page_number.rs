@@ -1061,4 +1061,422 @@ mod tests {
         let err4 = PageNumberError::InconsistentPageNumbers;
         assert!(!err4.to_string().is_empty());
     }
+
+    // Additional comprehensive tests
+
+    #[test]
+    fn test_search_region_boundary_values() {
+        // Exact boundaries
+        let opts_min = PageNumberOptions::builder()
+            .search_region_percent(5.0)
+            .build();
+        assert_eq!(opts_min.search_region_percent, 5.0);
+
+        let opts_max = PageNumberOptions::builder()
+            .search_region_percent(50.0)
+            .build();
+        assert_eq!(opts_max.search_region_percent, 50.0);
+
+        // Just below minimum
+        let opts_below = PageNumberOptions::builder()
+            .search_region_percent(4.9)
+            .build();
+        assert_eq!(opts_below.search_region_percent, 5.0);
+
+        // Just above maximum
+        let opts_above = PageNumberOptions::builder()
+            .search_region_percent(50.1)
+            .build();
+        assert_eq!(opts_above.search_region_percent, 50.0);
+    }
+
+    #[test]
+    fn test_confidence_boundary_values() {
+        // Zero confidence
+        let opts_zero = PageNumberOptions::builder().min_confidence(0.0).build();
+        assert_eq!(opts_zero.min_confidence, 0.0);
+
+        // Full confidence
+        let opts_full = PageNumberOptions::builder().min_confidence(100.0).build();
+        assert_eq!(opts_full.min_confidence, 100.0);
+
+        // Typical values
+        for conf in [25.0, 50.0, 75.0, 90.0] {
+            let opts = PageNumberOptions::builder().min_confidence(conf).build();
+            assert_eq!(opts.min_confidence, conf);
+        }
+    }
+
+    #[test]
+    fn test_builder_full_chain() {
+        let options = PageNumberOptions::builder()
+            .search_region_percent(20.0)
+            .ocr_language("deu")
+            .min_confidence(70.0)
+            .numbers_only(false)
+            .position_hint(PageNumberPosition::BottomOutside)
+            .build();
+
+        assert_eq!(options.search_region_percent, 20.0);
+        assert_eq!(options.ocr_language, "deu");
+        assert_eq!(options.min_confidence, 70.0);
+        assert!(!options.numbers_only);
+        assert_eq!(
+            options.position_hint,
+            Some(PageNumberPosition::BottomOutside)
+        );
+    }
+
+    #[test]
+    fn test_page_number_rect_various_sizes() {
+        // Small rectangle
+        let small = PageNumberRect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 5,
+        };
+        assert_eq!(small.width * small.height, 50);
+
+        // Large rectangle
+        let large = PageNumberRect {
+            x: 1000,
+            y: 2000,
+            width: 500,
+            height: 100,
+        };
+        assert_eq!(large.x + large.width, 1500);
+        assert_eq!(large.y + large.height, 2100);
+
+        // Full width rectangle
+        let full_width = PageNumberRect {
+            x: 0,
+            y: 900,
+            width: 2480,
+            height: 50,
+        };
+        assert_eq!(full_width.x, 0);
+        assert_eq!(full_width.width, 2480);
+    }
+
+    #[test]
+    fn test_detected_page_number_with_none() {
+        let detection = DetectedPageNumber {
+            page_index: 10,
+            number: None,
+            position: PageNumberRect {
+                x: 100,
+                y: 800,
+                width: 50,
+                height: 25,
+            },
+            confidence: 0.3,
+            raw_text: "???".to_string(),
+        };
+
+        assert!(detection.number.is_none());
+        assert_eq!(detection.page_index, 10);
+        assert_eq!(detection.confidence, 0.3);
+    }
+
+    #[test]
+    fn test_page_number_analysis_with_many_detections() {
+        let detections: Vec<DetectedPageNumber> = (1..=100)
+            .map(|i| DetectedPageNumber {
+                page_index: i - 1,
+                number: Some(i as i32),
+                position: PageNumberRect {
+                    x: if i % 2 == 1 { 50 } else { 400 },
+                    y: 900,
+                    width: 50,
+                    height: 30,
+                },
+                confidence: 0.9,
+                raw_text: i.to_string(),
+            })
+            .collect();
+
+        let analysis = PageNumberAnalysis {
+            detections: detections.clone(),
+            position_pattern: PageNumberPosition::BottomOutside,
+            odd_page_offset_x: 50,
+            even_page_offset_x: 400,
+            overall_confidence: 0.9,
+            missing_pages: vec![],
+            duplicate_pages: vec![],
+        };
+
+        assert_eq!(analysis.detections.len(), 100);
+        assert!(analysis.missing_pages.is_empty());
+        assert!(analysis.duplicate_pages.is_empty());
+    }
+
+    #[test]
+    fn test_offset_correction_empty() {
+        let correction = OffsetCorrection {
+            page_offsets: vec![],
+            unified_offset: 0,
+        };
+
+        assert!(correction.page_offsets.is_empty());
+        assert_eq!(correction.unified_offset, 0);
+    }
+
+    #[test]
+    fn test_offset_correction_negative_offsets() {
+        let correction = OffsetCorrection {
+            page_offsets: vec![(0, -50), (1, -30), (2, -40)],
+            unified_offset: -40,
+        };
+
+        for (_, offset) in &correction.page_offsets {
+            assert!(*offset < 0);
+        }
+        assert!(correction.unified_offset < 0);
+    }
+
+    #[test]
+    fn test_error_from_io_error_conversion() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
+        let page_err: PageNumberError = io_err.into();
+        let msg = page_err.to_string();
+        assert!(msg.contains("access denied") || msg.contains("IO error"));
+    }
+
+    #[test]
+    fn test_options_clone() {
+        let original = PageNumberOptions::builder()
+            .search_region_percent(15.0)
+            .ocr_language("jpn")
+            .min_confidence(70.0)
+            .build();
+
+        let cloned = original.clone();
+        assert_eq!(cloned.search_region_percent, original.search_region_percent);
+        assert_eq!(cloned.ocr_language, original.ocr_language);
+        assert_eq!(cloned.min_confidence, original.min_confidence);
+    }
+
+    #[test]
+    fn test_position_partial_eq() {
+        assert_eq!(
+            PageNumberPosition::BottomCenter,
+            PageNumberPosition::BottomCenter
+        );
+        assert_eq!(
+            PageNumberPosition::TopOutside,
+            PageNumberPosition::TopOutside
+        );
+        assert_ne!(
+            PageNumberPosition::BottomCenter,
+            PageNumberPosition::TopCenter
+        );
+        assert_ne!(
+            PageNumberPosition::BottomOutside,
+            PageNumberPosition::BottomInside
+        );
+    }
+
+    #[test]
+    fn test_validate_order_single_page() {
+        let analysis = PageNumberAnalysis {
+            detections: vec![DetectedPageNumber {
+                page_index: 0,
+                number: Some(1),
+                position: PageNumberRect {
+                    x: 0,
+                    y: 0,
+                    width: 100,
+                    height: 50,
+                },
+                confidence: 0.9,
+                raw_text: "1".to_string(),
+            }],
+            position_pattern: PageNumberPosition::BottomCenter,
+            odd_page_offset_x: 0,
+            even_page_offset_x: 0,
+            overall_confidence: 0.9,
+            missing_pages: vec![],
+            duplicate_pages: vec![],
+        };
+
+        // Single page should always be valid
+        let is_valid = TesseractPageDetector::validate_order(&analysis).unwrap();
+        assert!(is_valid);
+    }
+
+    #[test]
+    fn test_validate_order_empty() {
+        let analysis = PageNumberAnalysis {
+            detections: vec![],
+            position_pattern: PageNumberPosition::BottomCenter,
+            odd_page_offset_x: 0,
+            even_page_offset_x: 0,
+            overall_confidence: 0.0,
+            missing_pages: vec![],
+            duplicate_pages: vec![],
+        };
+
+        // Empty should be valid
+        let is_valid = TesseractPageDetector::validate_order(&analysis).unwrap();
+        assert!(is_valid);
+    }
+
+    #[test]
+    fn test_roman_numeral_invalid_inputs() {
+        // Empty string
+        assert_eq!(TesseractPageDetector::parse_roman_numeral(""), None);
+
+        // Invalid characters
+        assert_eq!(TesseractPageDetector::parse_roman_numeral("abc"), None);
+        assert_eq!(TesseractPageDetector::parse_roman_numeral("123"), None);
+        assert_eq!(TesseractPageDetector::parse_roman_numeral("xya"), None);
+
+        // Whitespace only
+        assert_eq!(TesseractPageDetector::parse_roman_numeral("   "), None);
+    }
+
+    #[test]
+    fn test_roman_numeral_with_whitespace() {
+        // Should handle leading/trailing whitespace
+        assert_eq!(TesseractPageDetector::parse_roman_numeral(" v "), Some(5));
+        assert_eq!(
+            TesseractPageDetector::parse_roman_numeral("  x  "),
+            Some(10)
+        );
+    }
+
+    #[test]
+    fn test_find_missing_pages_large_gap() {
+        let numbers = vec![1, 2, 10, 11];
+        let missing = TesseractPageDetector::find_missing_pages(&numbers);
+        // Should find pages 3-9 missing (indices 2-8)
+        assert_eq!(missing.len(), 7);
+    }
+
+    #[test]
+    fn test_find_duplicate_pages_multiple_duplicates() {
+        let numbers = vec![1, 1, 2, 3, 3, 3, 4, 5];
+        let duplicates = TesseractPageDetector::find_duplicate_pages(&numbers);
+        assert!(duplicates.contains(&1));
+        assert!(duplicates.contains(&3));
+        assert!(!duplicates.contains(&2));
+        assert!(!duplicates.contains(&4));
+    }
+
+    #[test]
+    fn test_ocr_language_various_values() {
+        let languages = ["eng", "jpn", "deu", "fra", "chi_sim", "kor", "jpn+eng"];
+
+        for lang in languages {
+            let opts = PageNumberOptions::builder().ocr_language(lang).build();
+            assert_eq!(opts.ocr_language, lang);
+        }
+    }
+
+    #[test]
+    fn test_numbers_only_toggle() {
+        let opts_true = PageNumberOptions::builder().numbers_only(true).build();
+        assert!(opts_true.numbers_only);
+
+        let opts_false = PageNumberOptions::builder().numbers_only(false).build();
+        assert!(!opts_false.numbers_only);
+    }
+
+    #[test]
+    fn test_detection_debug_impl() {
+        let detection = DetectedPageNumber {
+            page_index: 0,
+            number: Some(42),
+            position: PageNumberRect {
+                x: 100,
+                y: 800,
+                width: 50,
+                height: 25,
+            },
+            confidence: 0.95,
+            raw_text: "42".to_string(),
+        };
+
+        let debug_str = format!("{:?}", detection);
+        assert!(debug_str.contains("DetectedPageNumber"));
+        assert!(debug_str.contains("42"));
+    }
+
+    #[test]
+    fn test_analysis_debug_impl() {
+        let analysis = PageNumberAnalysis {
+            detections: vec![],
+            position_pattern: PageNumberPosition::TopCenter,
+            odd_page_offset_x: 10,
+            even_page_offset_x: 20,
+            overall_confidence: 0.8,
+            missing_pages: vec![5],
+            duplicate_pages: vec![],
+        };
+
+        let debug_str = format!("{:?}", analysis);
+        assert!(debug_str.contains("PageNumberAnalysis"));
+        assert!(debug_str.contains("TopCenter"));
+    }
+
+    #[test]
+    fn test_offset_correction_debug_impl() {
+        let correction = OffsetCorrection {
+            page_offsets: vec![(0, 10)],
+            unified_offset: 10,
+        };
+
+        let debug_str = format!("{:?}", correction);
+        assert!(debug_str.contains("OffsetCorrection"));
+        assert!(debug_str.contains("10"));
+    }
+
+    #[test]
+    fn test_preset_methods_inherited_defaults() {
+        // Japanese preset should have default confidence
+        let jpn = PageNumberOptions::japanese();
+        assert_eq!(jpn.min_confidence, 60.0);
+        assert!(jpn.numbers_only);
+
+        // English preset should have default search region
+        let eng = PageNumberOptions::english();
+        assert_eq!(eng.search_region_percent, 10.0);
+
+        // Strict preset should have default language
+        let strict = PageNumberOptions::strict();
+        assert_eq!(strict.ocr_language, "jpn+eng");
+    }
+
+    #[test]
+    fn test_calculate_offset_with_all_odd_pages() {
+        let detections = (0..5)
+            .map(|i| DetectedPageNumber {
+                page_index: i,
+                number: Some((i * 2 + 1) as i32), // 1, 3, 5, 7, 9
+                position: PageNumberRect {
+                    x: 50,
+                    y: 900,
+                    width: 50,
+                    height: 30,
+                },
+                confidence: 0.9,
+                raw_text: format!("{}", i * 2 + 1),
+            })
+            .collect();
+
+        let analysis = PageNumberAnalysis {
+            detections,
+            position_pattern: PageNumberPosition::BottomOutside,
+            odd_page_offset_x: 100,
+            even_page_offset_x: 200,
+            overall_confidence: 0.9,
+            missing_pages: vec![],
+            duplicate_pages: vec![],
+        };
+
+        let offset = TesseractPageDetector::calculate_offset(&analysis, 2480).unwrap();
+        // All pages are odd, so unified should be odd offset
+        assert_eq!(offset.unified_offset, 100);
+    }
 }

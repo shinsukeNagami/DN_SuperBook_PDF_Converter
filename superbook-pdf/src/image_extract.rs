@@ -856,4 +856,287 @@ mod tests {
             }
         }
     }
+
+    // Additional comprehensive tests
+
+    #[test]
+    fn test_dpi_boundary_values() {
+        // Minimum boundary (should clamp to 72)
+        let options_below = ExtractOptions::builder().dpi(50).build();
+        assert_eq!(options_below.dpi, 72);
+
+        // Exact minimum
+        let options_min = ExtractOptions::builder().dpi(72).build();
+        assert_eq!(options_min.dpi, 72);
+
+        // Normal range
+        let options_normal = ExtractOptions::builder().dpi(300).build();
+        assert_eq!(options_normal.dpi, 300);
+
+        // Maximum boundary
+        let options_max = ExtractOptions::builder().dpi(1200).build();
+        assert_eq!(options_max.dpi, 1200);
+
+        // Above maximum (should clamp to 1200)
+        let options_above = ExtractOptions::builder().dpi(2400).build();
+        assert_eq!(options_above.dpi, 1200);
+    }
+
+    #[test]
+    fn test_jpeg_quality_edge_cases() {
+        // Minimum quality
+        let opts_min = ExtractOptions::builder()
+            .format(ImageFormat::Jpeg { quality: 0 })
+            .build();
+        if let ImageFormat::Jpeg { quality } = opts_min.format {
+            assert_eq!(quality, 0);
+        } else {
+            panic!("Expected JPEG format");
+        }
+
+        // Maximum quality
+        let opts_max = ExtractOptions::builder()
+            .format(ImageFormat::Jpeg { quality: 100 })
+            .build();
+        if let ImageFormat::Jpeg { quality } = opts_max.format {
+            assert_eq!(quality, 100);
+        } else {
+            panic!("Expected JPEG format");
+        }
+
+        // Typical quality values
+        for q in [1, 50, 75, 85, 99] {
+            let opts = ExtractOptions::builder()
+                .format(ImageFormat::Jpeg { quality: q })
+                .build();
+            if let ImageFormat::Jpeg { quality } = opts.format {
+                assert_eq!(quality, q);
+            }
+        }
+    }
+
+    #[test]
+    fn test_builder_method_chaining() {
+        // Test that all builder methods can be chained
+        let options = ExtractOptions::builder()
+            .dpi(400)
+            .format(ImageFormat::Tiff)
+            .colorspace(ColorSpace::Cmyk)
+            .background([128, 128, 128])
+            .parallel(8)
+            .build();
+
+        assert_eq!(options.dpi, 400);
+        assert!(matches!(options.format, ImageFormat::Tiff));
+        assert_eq!(options.colorspace, ColorSpace::Cmyk);
+        assert_eq!(options.background, Some([128, 128, 128]));
+        assert_eq!(options.parallel, 8);
+    }
+
+    #[test]
+    fn test_extracted_page_various_sizes() {
+        // Standard A4 at 300 DPI
+        let a4_page = ExtractedPage {
+            page_index: 0,
+            path: PathBuf::from("/tmp/a4.png"),
+            width: 2480,
+            height: 3508,
+            format: ImageFormat::Png,
+        };
+        assert_eq!(a4_page.width, 2480);
+        assert_eq!(a4_page.height, 3508);
+
+        // Letter size at 300 DPI
+        let letter_page = ExtractedPage {
+            page_index: 1,
+            path: PathBuf::from("/tmp/letter.png"),
+            width: 2550,
+            height: 3300,
+            format: ImageFormat::Png,
+        };
+        assert_eq!(letter_page.width, 2550);
+        assert_eq!(letter_page.height, 3300);
+
+        // Square thumbnail
+        let thumb = ExtractedPage {
+            page_index: 99,
+            path: PathBuf::from("/tmp/thumb.jpg"),
+            width: 150,
+            height: 150,
+            format: ImageFormat::Jpeg { quality: 70 },
+        };
+        assert_eq!(thumb.width, thumb.height);
+    }
+
+    #[test]
+    fn test_error_from_io_error() {
+        // Test From<std::io::Error> conversion
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let extract_err: ExtractError = io_err.into();
+        let msg = extract_err.to_string();
+        assert!(msg.contains("file not found") || msg.contains("IO error"));
+    }
+
+    #[test]
+    fn test_preset_high_quality_details() {
+        let hq = ExtractOptions::high_quality();
+        assert_eq!(hq.dpi, 600);
+        assert!(matches!(hq.format, ImageFormat::Png));
+        // Should inherit other defaults
+        assert_eq!(hq.colorspace, ColorSpace::Rgb);
+        assert!(hq.background.is_some());
+    }
+
+    #[test]
+    fn test_preset_fast_details() {
+        let fast = ExtractOptions::fast();
+        assert_eq!(fast.dpi, 150);
+        if let ImageFormat::Jpeg { quality } = fast.format {
+            assert_eq!(quality, 80);
+        } else {
+            panic!("Fast preset should use JPEG");
+        }
+    }
+
+    #[test]
+    fn test_preset_grayscale_details() {
+        let gray = ExtractOptions::grayscale();
+        assert_eq!(gray.colorspace, ColorSpace::Grayscale);
+        // Should have default DPI
+        assert_eq!(gray.dpi, 300);
+    }
+
+    #[test]
+    fn test_background_color_extremes() {
+        // Pure black
+        let black = ExtractOptions::builder().background([0, 0, 0]).build();
+        assert_eq!(black.background, Some([0, 0, 0]));
+
+        // Pure white
+        let white = ExtractOptions::builder()
+            .background([255, 255, 255])
+            .build();
+        assert_eq!(white.background, Some([255, 255, 255]));
+
+        // Gray
+        let gray = ExtractOptions::builder()
+            .background([128, 128, 128])
+            .build();
+        assert_eq!(gray.background, Some([128, 128, 128]));
+
+        // Primary colors
+        let red = ExtractOptions::builder().background([255, 0, 0]).build();
+        assert_eq!(red.background, Some([255, 0, 0]));
+
+        let green = ExtractOptions::builder().background([0, 255, 0]).build();
+        assert_eq!(green.background, Some([0, 255, 0]));
+
+        let blue = ExtractOptions::builder().background([0, 0, 255]).build();
+        assert_eq!(blue.background, Some([0, 0, 255]));
+    }
+
+    #[test]
+    fn test_extract_options_debug_impl() {
+        let options = ExtractOptions::builder()
+            .dpi(300)
+            .format(ImageFormat::Png)
+            .build();
+
+        let debug_str = format!("{:?}", options);
+        assert!(debug_str.contains("ExtractOptions"));
+        assert!(debug_str.contains("dpi"));
+        assert!(debug_str.contains("300"));
+    }
+
+    #[test]
+    fn test_extract_options_with_callback_debug() {
+        let options = ExtractOptions::builder()
+            .progress_callback(Box::new(|_, _| {}))
+            .build();
+
+        let debug_str = format!("{:?}", options);
+        assert!(debug_str.contains("<callback>"));
+    }
+
+    #[test]
+    fn test_image_format_default() {
+        let format: ImageFormat = Default::default();
+        assert!(matches!(format, ImageFormat::Png));
+    }
+
+    #[test]
+    fn test_colorspace_default() {
+        let cs: ColorSpace = Default::default();
+        assert_eq!(cs, ColorSpace::Rgb);
+    }
+
+    #[test]
+    fn test_parallel_workers_various_values() {
+        // Test various worker counts
+        for workers in [1, 2, 4, 8, 16, 32, 64] {
+            let options = ExtractOptions::builder().parallel(workers).build();
+            assert_eq!(options.parallel, workers);
+        }
+    }
+
+    #[test]
+    fn test_extracted_page_with_all_formats() {
+        let formats = [
+            (ImageFormat::Png, "png"),
+            (ImageFormat::Jpeg { quality: 85 }, "jpg"),
+            (ImageFormat::Bmp, "bmp"),
+            (ImageFormat::Tiff, "tiff"),
+        ];
+
+        for (idx, (format, ext)) in formats.iter().enumerate() {
+            let page = ExtractedPage {
+                page_index: idx,
+                path: PathBuf::from(format!("/tmp/page.{}", ext)),
+                width: 1000,
+                height: 1500,
+                format: *format,
+            };
+            assert_eq!(page.page_index, idx);
+            assert!(page.path.to_string_lossy().ends_with(ext));
+        }
+    }
+
+    #[test]
+    fn test_error_display_all_variants() {
+        let errors = [
+            ExtractError::PdfNotFound(PathBuf::from("/test.pdf")),
+            ExtractError::OutputNotWritable(PathBuf::from("/output")),
+            ExtractError::ExtractionFailed {
+                page: 1,
+                reason: "test reason".to_string(),
+            },
+            ExtractError::ExternalToolError("tool error".to_string()),
+        ];
+
+        for err in &errors {
+            let display = format!("{}", err);
+            assert!(!display.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_options_builder_default_state() {
+        let builder = ExtractOptionsBuilder::default();
+        let options = builder.build();
+
+        // Should have default values
+        assert_eq!(options.dpi, 300);
+        assert!(matches!(options.format, ImageFormat::Png));
+        assert_eq!(options.colorspace, ColorSpace::Rgb);
+    }
+
+    #[test]
+    fn test_colorspace_partial_eq() {
+        assert_eq!(ColorSpace::Rgb, ColorSpace::Rgb);
+        assert_eq!(ColorSpace::Grayscale, ColorSpace::Grayscale);
+        assert_eq!(ColorSpace::Cmyk, ColorSpace::Cmyk);
+        assert_ne!(ColorSpace::Rgb, ColorSpace::Grayscale);
+        assert_ne!(ColorSpace::Rgb, ColorSpace::Cmyk);
+        assert_ne!(ColorSpace::Grayscale, ColorSpace::Cmyk);
+    }
 }
