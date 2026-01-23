@@ -1726,4 +1726,151 @@ mod tests {
             assert!(!debug.is_empty());
         }
     }
+
+    // ==================== Boundary Value Tests ====================
+
+    #[test]
+    fn test_angle_boundary_zero() {
+        let detection = SkewDetection {
+            angle: 0.0,
+            confidence: 0.99,
+            feature_count: 100,
+        };
+        assert_eq!(detection.angle, 0.0);
+    }
+
+    #[test]
+    fn test_angle_boundary_max_positive() {
+        let opts = DeskewOptions::builder().max_angle(90.0).build();
+        assert_eq!(opts.max_angle, 90.0);
+    }
+
+    #[test]
+    fn test_angle_boundary_very_small() {
+        let detection = SkewDetection {
+            angle: 0.001,
+            confidence: 0.5,
+            feature_count: 50,
+        };
+        assert!(detection.angle > 0.0);
+        assert!(detection.angle < 0.01);
+    }
+
+    #[test]
+    fn test_threshold_angle_zero() {
+        let opts = DeskewOptions::builder().threshold_angle(0.0).build();
+        assert_eq!(opts.threshold_angle, 0.0);
+    }
+
+    #[test]
+    fn test_confidence_boundary_zero() {
+        let detection = SkewDetection {
+            angle: 5.0,
+            confidence: 0.0,
+            feature_count: 10,
+        };
+        assert_eq!(detection.confidence, 0.0);
+    }
+
+    #[test]
+    fn test_confidence_boundary_one() {
+        let detection = SkewDetection {
+            angle: 2.5,
+            confidence: 1.0,
+            feature_count: 200,
+        };
+        assert_eq!(detection.confidence, 1.0);
+    }
+
+    #[test]
+    fn test_image_size_boundary_minimum() {
+        let result = DeskewResult {
+            detection: SkewDetection {
+                angle: 0.0,
+                confidence: 0.9,
+                feature_count: 5,
+            },
+            corrected: false,
+            output_path: PathBuf::from("/out.png"),
+            original_size: (1, 1),
+            corrected_size: (1, 1),
+        };
+        assert_eq!(result.original_size, (1, 1));
+    }
+
+    #[test]
+    fn test_image_size_boundary_large() {
+        let result = DeskewResult {
+            detection: SkewDetection {
+                angle: 0.5,
+                confidence: 0.95,
+                feature_count: 1000,
+            },
+            corrected: true,
+            output_path: PathBuf::from("/large.png"),
+            original_size: (10000, 10000),
+            corrected_size: (10050, 10050),
+        };
+        assert_eq!(result.original_size.0, 10000);
+    }
+
+    #[test]
+    fn test_negative_angle() {
+        let detection = SkewDetection {
+            angle: -5.0,
+            confidence: 0.85,
+            feature_count: 75,
+        };
+        assert!(detection.angle < 0.0);
+    }
+
+    #[test]
+    fn test_background_color_boundaries() {
+        let opts = DeskewOptions::builder().background_color([0, 0, 0]).build();
+        assert_eq!(opts.background_color, [0, 0, 0]);
+
+        let opts2 = DeskewOptions::builder()
+            .background_color([255, 255, 255])
+            .build();
+        assert_eq!(opts2.background_color, [255, 255, 255]);
+    }
+
+    #[test]
+    fn test_max_angle_equals_threshold() {
+        let opts = DeskewOptions::builder()
+            .max_angle(5.0)
+            .threshold_angle(5.0)
+            .build();
+        assert_eq!(opts.max_angle, opts.threshold_angle);
+    }
+
+    #[test]
+    fn test_threshold_greater_than_max_angle() {
+        // This is a valid but unusual configuration
+        let opts = DeskewOptions::builder()
+            .max_angle(5.0)
+            .threshold_angle(10.0)
+            .build();
+        assert!(opts.threshold_angle > opts.max_angle);
+    }
+
+    #[test]
+    fn test_feature_count_boundary_zero() {
+        let detection = SkewDetection {
+            angle: 1.0,
+            confidence: 0.5,
+            feature_count: 0,
+        };
+        assert_eq!(detection.feature_count, 0);
+    }
+
+    #[test]
+    fn test_feature_count_boundary_large() {
+        let detection = SkewDetection {
+            angle: 2.0,
+            confidence: 0.99,
+            feature_count: 10000,
+        };
+        assert_eq!(detection.feature_count, 10000);
+    }
 }

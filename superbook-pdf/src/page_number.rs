@@ -1672,4 +1672,143 @@ mod tests {
         assert_eq!(detection.number, Some(42));
         assert!(detection.confidence > 0.9);
     }
+
+    // ==================== Concurrency Tests ====================
+
+    #[test]
+    fn test_page_number_types_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<PageNumberOptions>();
+        assert_send_sync::<PageNumberRect>();
+        assert_send_sync::<DetectedPageNumber>();
+        assert_send_sync::<PageNumberAnalysis>();
+    }
+
+    #[test]
+    fn test_concurrent_options_building() {
+        use std::thread;
+
+        let handles: Vec<_> = (0..4)
+            .map(|i| {
+                thread::spawn(move || -> PageNumberOptions {
+                    PageNumberOptions::builder()
+                        .min_confidence(50.0 + (i as f32 * 10.0))
+                        .search_region_percent(10.0 + i as f32)
+                        .build()
+                })
+            })
+            .collect();
+
+        for (i, handle) in handles.into_iter().enumerate() {
+            let opts: PageNumberOptions = handle.join().unwrap();
+            let expected_conf = 50.0 + (i as f32 * 10.0);
+            assert!((opts.min_confidence - expected_conf).abs() < 0.001);
+            let expected_region = 10.0 + i as f32;
+            assert!((opts.search_region_percent - expected_region).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn test_parallel_page_rect_creation() {
+        let rects: Vec<_> = (0..100)
+            .into_par_iter()
+            .map(|i| PageNumberRect {
+                x: i * 10,
+                y: i * 20,
+                width: 50,
+                height: 30,
+            })
+            .collect();
+
+        assert_eq!(rects.len(), 100);
+        assert_eq!(rects[50].x, 500);
+        assert_eq!(rects[50].y, 1000);
+    }
+
+    #[test]
+    fn test_detection_thread_transfer() {
+        use std::thread;
+
+        let detection = DetectedPageNumber {
+            page_index: 10,
+            number: Some(100),
+            position: PageNumberRect {
+                x: 200,
+                y: 800,
+                width: 40,
+                height: 25,
+            },
+            confidence: 0.92,
+            raw_text: "100".to_string(),
+        };
+
+        let handle = thread::spawn(move || {
+            assert_eq!(detection.page_index, 10);
+            assert_eq!(detection.number, Some(100));
+            detection
+        });
+
+        let received = handle.join().unwrap();
+        assert_eq!(received.confidence, 0.92);
+        assert_eq!(received.raw_text, "100");
+    }
+
+    #[test]
+    fn test_analysis_thread_safety() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let analysis = Arc::new(PageNumberAnalysis {
+            detections: vec![],
+            position_pattern: PageNumberPosition::BottomCenter,
+            odd_page_offset_x: 5,
+            even_page_offset_x: -5,
+            overall_confidence: 0.88,
+            missing_pages: vec![3, 7],
+            duplicate_pages: vec![],
+        });
+
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let a = Arc::clone(&analysis);
+                thread::spawn(move || {
+                    assert_eq!(a.odd_page_offset_x, 5);
+                    assert_eq!(a.even_page_offset_x, -5);
+                    a.overall_confidence
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            let conf = handle.join().unwrap();
+            assert!((conf - 0.88).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn test_concurrent_position_enum_usage() {
+        use std::thread;
+
+        let positions = vec![
+            PageNumberPosition::BottomCenter,
+            PageNumberPosition::BottomOutside,
+            PageNumberPosition::BottomInside,
+            PageNumberPosition::TopCenter,
+            PageNumberPosition::TopOutside,
+        ];
+
+        let handles: Vec<_> = positions
+            .into_iter()
+            .map(|pos| {
+                thread::spawn(move || {
+                    // Verify position can be used in different threads
+                    format!("{:?}", pos)
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(results.len(), 5);
+        assert!(results[0].contains("BottomCenter"));
+    }
 }

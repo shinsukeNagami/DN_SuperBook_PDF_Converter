@@ -1535,4 +1535,125 @@ mod tests {
             panic!("Wrong error variant");
         }
     }
+
+    // ==================== Boundary Value Tests ====================
+
+    #[test]
+    fn test_timeout_zero() {
+        let config = AiBridgeConfig::builder()
+            .timeout(Duration::from_secs(0))
+            .build();
+        assert_eq!(config.timeout, Duration::from_secs(0));
+    }
+
+    #[test]
+    fn test_timeout_max_value() {
+        let config = AiBridgeConfig::builder()
+            .timeout(Duration::from_secs(u64::MAX))
+            .build();
+        assert_eq!(config.timeout, Duration::from_secs(u64::MAX));
+    }
+
+    #[test]
+    fn test_max_retries_zero() {
+        let config = AiBridgeConfig::builder().max_retries(0).build();
+        assert_eq!(config.retry_config.max_retries, 0);
+    }
+
+    #[test]
+    fn test_max_retries_large() {
+        let config = AiBridgeConfig::builder().max_retries(1000).build();
+        assert_eq!(config.retry_config.max_retries, 1000);
+    }
+
+    #[test]
+    fn test_gpu_device_zero() {
+        let config = AiBridgeConfig::builder().gpu_device(0).build();
+        assert_eq!(config.gpu_config.device_id, Some(0));
+    }
+
+    #[test]
+    fn test_gpu_device_high_id() {
+        let config = AiBridgeConfig::builder().gpu_device(15).build();
+        assert_eq!(config.gpu_config.device_id, Some(15));
+    }
+
+    #[test]
+    fn test_progress_boundary_zero() {
+        let status = ProcessStatus::Running { progress: 0.0 };
+        if let ProcessStatus::Running { progress } = status {
+            assert_eq!(progress, 0.0);
+        }
+    }
+
+    #[test]
+    fn test_progress_boundary_one() {
+        let status = ProcessStatus::Running { progress: 1.0 };
+        if let ProcessStatus::Running { progress } = status {
+            assert_eq!(progress, 1.0);
+        }
+    }
+
+    #[test]
+    fn test_progress_boundary_negative() {
+        // Negative progress is technically allowed by the type
+        let status = ProcessStatus::Running { progress: -0.1 };
+        if let ProcessStatus::Running { progress } = status {
+            assert!(progress < 0.0);
+        }
+    }
+
+    #[test]
+    fn test_progress_boundary_over_one() {
+        // Progress over 1.0 is technically allowed by the type
+        let status = ProcessStatus::Running { progress: 1.5 };
+        if let ProcessStatus::Running { progress } = status {
+            assert!(progress > 1.0);
+        }
+    }
+
+    #[test]
+    fn test_duration_zero_completed() {
+        let status = ProcessStatus::Completed {
+            duration: Duration::from_secs(0),
+        };
+        if let ProcessStatus::Completed { duration } = status {
+            assert_eq!(duration, Duration::ZERO);
+        }
+    }
+
+    #[test]
+    fn test_duration_nanos() {
+        let status = ProcessStatus::Completed {
+            duration: Duration::from_nanos(1),
+        };
+        if let ProcessStatus::Completed { duration } = status {
+            assert_eq!(duration.as_nanos(), 1);
+        }
+    }
+
+    #[test]
+    fn test_retries_max_failed() {
+        let status = ProcessStatus::Failed {
+            error: "max".to_string(),
+            retries: u32::MAX,
+        };
+        if let ProcessStatus::Failed { retries, .. } = status {
+            assert_eq!(retries, u32::MAX);
+        }
+    }
+
+    #[test]
+    fn test_timeout_error_zero_duration() {
+        let err = AiBridgeError::Timeout(Duration::ZERO);
+        let msg = err.to_string();
+        assert!(msg.contains("0"));
+    }
+
+    #[test]
+    fn test_timeout_error_large_duration() {
+        let err = AiBridgeError::Timeout(Duration::from_secs(86400 * 365));
+        let msg = err.to_string();
+        assert!(!msg.is_empty());
+    }
 }

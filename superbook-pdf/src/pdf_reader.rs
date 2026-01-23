@@ -1305,4 +1305,148 @@ mod tests {
         let msg = format!("{}", err);
         assert!(msg.contains("line: 42"));
     }
+
+    // ==================== Concurrency Tests ====================
+
+    #[test]
+    fn test_pdf_reader_types_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<PdfDocument>();
+        assert_send_sync::<PdfMetadata>();
+        assert_send_sync::<PdfPage>();
+    }
+
+    #[test]
+    fn test_concurrent_pdf_document_creation() {
+        use std::thread;
+
+        let handles: Vec<_> = (0..4)
+            .map(|i| {
+                thread::spawn(move || -> PdfDocument {
+                    PdfDocument {
+                        page_count: i + 1,
+                        pages: vec![],
+                        metadata: PdfMetadata::default(),
+                        path: PathBuf::from(format!("/doc_{}.pdf", i)),
+                        is_encrypted: false,
+                    }
+                })
+            })
+            .collect();
+
+        for (i, handle) in handles.into_iter().enumerate() {
+            let doc: PdfDocument = handle.join().unwrap();
+            assert_eq!(doc.page_count, i + 1);
+            assert!(!doc.is_encrypted);
+        }
+    }
+
+    #[test]
+    fn test_concurrent_pdf_page_creation() {
+        use rayon::prelude::*;
+
+        let pages: Vec<_> = (0..100)
+            .into_par_iter()
+            .map(|i| PdfPage {
+                index: i,
+                width_pt: 595.0 + i as f64,
+                height_pt: 842.0 + i as f64,
+                rotation: if i % 2 == 0 { 0 } else { 90 },
+                has_images: true,
+                has_text: false,
+            })
+            .collect();
+
+        assert_eq!(pages.len(), 100);
+        assert_eq!(pages[50].width_pt, 645.0);
+        assert_eq!(pages[50].rotation, 0);
+        assert_eq!(pages[51].rotation, 90);
+    }
+
+    #[test]
+    fn test_metadata_thread_transfer() {
+        use std::thread;
+
+        let metadata = PdfMetadata {
+            title: Some("Test Document".to_string()),
+            author: Some("Test Author".to_string()),
+            subject: None,
+            keywords: None,
+            creator: Some("Test Creator".to_string()),
+            producer: None,
+            creation_date: None,
+            modification_date: None,
+        };
+
+        let handle = thread::spawn(move || -> PdfMetadata {
+            assert_eq!(metadata.title, Some("Test Document".to_string()));
+            metadata
+        });
+
+        let received: PdfMetadata = handle.join().unwrap();
+        assert_eq!(received.author, Some("Test Author".to_string()));
+    }
+
+    #[test]
+    fn test_pdf_document_shared_read() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let doc = Arc::new(PdfDocument {
+            page_count: 10,
+            pages: vec![PdfPage {
+                index: 0,
+                width_pt: 595.0,
+                height_pt: 842.0,
+                rotation: 0,
+                has_images: true,
+                has_text: true,
+            }],
+            metadata: PdfMetadata::default(),
+            path: PathBuf::from("/shared.pdf"),
+            is_encrypted: false,
+        });
+
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let d = Arc::clone(&doc);
+                thread::spawn(move || -> usize {
+                    assert_eq!(d.page_count, 10);
+                    assert!(!d.is_encrypted);
+                    d.pages.len()
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            let len: usize = handle.join().unwrap();
+            assert_eq!(len, 1);
+        }
+    }
+
+    #[test]
+    fn test_parallel_error_creation() {
+        use rayon::prelude::*;
+
+        let errors: Vec<_> = (0..50)
+            .into_par_iter()
+            .map(|i| {
+                if i % 3 == 0 {
+                    PdfReaderError::FileNotFound(PathBuf::from(format!("/file_{}.pdf", i)))
+                } else if i % 3 == 1 {
+                    PdfReaderError::InvalidFormat(format!("invalid_{}", i))
+                } else {
+                    PdfReaderError::EncryptedPdf
+                }
+            })
+            .collect();
+
+        assert_eq!(errors.len(), 50);
+
+        let encrypted_count = errors
+            .iter()
+            .filter(|e| matches!(e, PdfReaderError::EncryptedPdf))
+            .count();
+        assert!(encrypted_count > 0);
+    }
 }

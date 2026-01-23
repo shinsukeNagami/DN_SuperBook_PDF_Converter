@@ -1977,4 +1977,129 @@ mod tests {
             assert!(detection.confidence <= 1.0);
         }
     }
+
+    // ==================== Concurrency Tests ====================
+
+    #[test]
+    fn test_parallel_detection_consistency() {
+        use rayon::prelude::*;
+        use std::sync::Arc;
+
+        let options = Arc::new(MarginOptions::default());
+
+        // Create multiple paths to test
+        let paths: Vec<PathBuf> = (0..10)
+            .map(|i| PathBuf::from(format!("/nonexistent/path_{}.png", i)))
+            .collect();
+
+        // All should fail consistently with ImageNotFound
+        let results: Vec<_> = paths
+            .par_iter()
+            .map(|p| ImageMarginDetector::detect(p, &options))
+            .collect();
+
+        for result in results {
+            assert!(result.is_err());
+            assert!(matches!(result.unwrap_err(), MarginError::ImageNotFound(_)));
+        }
+    }
+
+    #[test]
+    fn test_options_shared_across_threads() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let options = Arc::new(MarginOptions::builder().background_threshold(200).build());
+
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let opts = Arc::clone(&options);
+                thread::spawn(move || {
+                    assert_eq!(opts.background_threshold, 200);
+                    opts.clone()
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            let result = handle.join().unwrap();
+            assert_eq!(result.background_threshold, 200);
+        }
+    }
+
+    #[test]
+    fn test_margins_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Margins>();
+        assert_send_sync::<ContentRect>();
+        assert_send_sync::<MarginOptions>();
+    }
+
+    #[test]
+    fn test_concurrent_margin_calculations() {
+        use std::thread;
+
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                thread::spawn(move || {
+                    let margin = Margins::uniform(i as u32 * 10);
+                    (margin.total_horizontal(), margin.total_vertical())
+                })
+            })
+            .collect();
+
+        for (i, handle) in handles.into_iter().enumerate() {
+            let (h, v) = handle.join().unwrap();
+            assert_eq!(h, i as u32 * 20);
+            assert_eq!(v, i as u32 * 20);
+        }
+    }
+
+    #[test]
+    fn test_builder_thread_safety() {
+        use std::thread;
+
+        let handles: Vec<_> = (0..4)
+            .map(|i| {
+                thread::spawn(move || {
+                    MarginOptions::builder()
+                        .background_threshold(200 + i as u8)
+                        .min_margin(10 + i as u32)
+                        .build()
+                })
+            })
+            .collect();
+
+        for (i, handle) in handles.into_iter().enumerate() {
+            let opts = handle.join().unwrap();
+            assert_eq!(opts.background_threshold, 200 + i as u8);
+            assert_eq!(opts.min_margin, 10 + i as u32);
+        }
+    }
+
+    #[test]
+    fn test_detection_result_thread_transfer() {
+        use std::thread;
+
+        let detection = MarginDetection {
+            margins: Margins::uniform(50),
+            image_size: (1000, 800),
+            content_rect: ContentRect {
+                x: 50,
+                y: 50,
+                width: 900,
+                height: 700,
+            },
+            confidence: 0.95,
+        };
+
+        let handle = thread::spawn(move || {
+            assert_eq!(detection.margins.top, 50);
+            assert_eq!(detection.image_size, (1000, 800));
+            detection
+        });
+
+        let received = handle.join().unwrap();
+        assert_eq!(received.confidence, 0.95);
+    }
 }
