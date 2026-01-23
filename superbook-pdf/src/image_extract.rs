@@ -1,6 +1,37 @@
 //! Image Extraction module
 //!
 //! Provides functionality to extract page images from PDF files.
+//!
+//! # Features
+//!
+//! - Extract pages as PNG, JPEG, or TIFF
+//! - Configurable DPI (72-1200)
+//! - Color space conversion (RGB, Grayscale, CMYK)
+//! - Parallel extraction with progress callbacks
+//! - Transparent background handling
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use superbook_pdf::{ExtractOptions, MagickExtractor, ImageFormat, ColorSpace};
+//! use std::path::Path;
+//!
+//! // Create options
+//! let options = ExtractOptions::builder()
+//!     .dpi(300)
+//!     .format(ImageFormat::Png)
+//!     .colorspace(ColorSpace::Rgb)
+//!     .parallel(4)
+//!     .build();
+//!
+//! // Extract a single page
+//! // let result = MagickExtractor::extract_page(
+//! //     Path::new("input.pdf"),
+//! //     0,
+//! //     Path::new("output/page_0.png"),
+//! //     &options,
+//! // );
+//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

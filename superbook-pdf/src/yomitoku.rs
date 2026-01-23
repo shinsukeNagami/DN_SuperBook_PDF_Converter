@@ -1,6 +1,29 @@
 //! YomiToku Japanese AI-OCR module
 //!
 //! Provides integration with YomiToku for Japanese text recognition in images.
+//!
+//! # Features
+//!
+//! - High-accuracy Japanese OCR
+//! - Vertical/horizontal text detection
+//! - Searchable PDF layer generation
+//! - Batch processing support
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use superbook_pdf::{YomiToku, YomiTokuOptions};
+//! use superbook_pdf::yomitoku::Language;
+//!
+//! // Configure OCR
+//! let options = YomiTokuOptions::builder()
+//!     .language(Language::Japanese)
+//!     .confidence_threshold(0.5)
+//!     .build();
+//!
+//! // Perform OCR
+//! // let result = YomiToku::new().recognize("page.png", &options);
+//! ```
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

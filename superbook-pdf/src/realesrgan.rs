@@ -1,6 +1,28 @@
 //! RealESRGAN Integration module
 //!
 //! Provides integration with RealESRGAN AI upscaling model.
+//!
+//! # Features
+//!
+//! - 2x/4x AI upscaling for scanned images
+//! - Multiple model support (general, anime, video)
+//! - VRAM-aware tile processing
+//! - GPU acceleration with fallback
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use superbook_pdf::{RealEsrgan, RealEsrganOptions};
+//!
+//! // Configure upscaling
+//! let options = RealEsrganOptions::builder()
+//!     .scale(2)
+//!     .tile_size(400)
+//!     .build();
+//!
+//! // Upscale an image
+//! // let result = RealEsrgan::new().upscale("input.png", "output.png", &options);
+//! ```
 
 use crate::ai_bridge::{AiBridgeError, AiTool, SubprocessBridge};
 use std::path::{Path, PathBuf};

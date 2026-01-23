@@ -1,6 +1,28 @@
 //! AI Tools Bridge module
 //!
 //! Provides communication with external AI tools (Python: `RealESRGAN`, `YomiToku`, etc.)
+//!
+//! # Features
+//!
+//! - Subprocess management for Python AI tools
+//! - GPU/CPU configuration with VRAM limits
+//! - Automatic retry on failure
+//! - Progress and timeout handling
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use superbook_pdf::{AiBridgeConfig, SubprocessBridge, AiTool};
+//!
+//! // Configure AI bridge
+//! let config = AiBridgeConfig::builder()
+//!     .gpu_enabled(true)
+//!     .max_retries(3)
+//!     .build();
+//!
+//! // Create bridge for RealESRGAN
+//! // let bridge = SubprocessBridge::new(AiTool::RealEsrgan, &config);
+//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
