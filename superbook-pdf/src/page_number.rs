@@ -1479,4 +1479,169 @@ mod tests {
         // All pages are odd, so unified should be odd offset
         assert_eq!(offset.unified_offset, 100);
     }
+
+    // ============================================================
+    // Error handling tests
+    // ============================================================
+
+    #[test]
+    fn test_error_image_not_found_display() {
+        let path = PathBuf::from("/test/missing_page.png");
+        let err = PageNumberError::ImageNotFound(path);
+        let msg = format!("{}", err);
+        assert!(msg.contains("Image not found"));
+        assert!(msg.contains("missing_page.png"));
+    }
+
+    #[test]
+    fn test_error_image_not_found_debug() {
+        let path = PathBuf::from("/test/missing_page.png");
+        let err = PageNumberError::ImageNotFound(path);
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("ImageNotFound"));
+    }
+
+    #[test]
+    fn test_error_ocr_failed_display() {
+        let err = PageNumberError::OcrFailed("tesseract crashed".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("OCR failed"));
+        assert!(msg.contains("tesseract crashed"));
+    }
+
+    #[test]
+    fn test_error_ocr_failed_debug() {
+        let err = PageNumberError::OcrFailed("recognition error".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("OcrFailed"));
+    }
+
+    #[test]
+    fn test_error_no_page_numbers_detected_display() {
+        let err = PageNumberError::NoPageNumbersDetected;
+        let msg = format!("{}", err);
+        assert!(msg.contains("No page numbers detected"));
+    }
+
+    #[test]
+    fn test_error_no_page_numbers_detected_debug() {
+        let err = PageNumberError::NoPageNumbersDetected;
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("NoPageNumbersDetected"));
+    }
+
+    #[test]
+    fn test_error_inconsistent_page_numbers_display() {
+        let err = PageNumberError::InconsistentPageNumbers;
+        let msg = format!("{}", err);
+        assert!(msg.contains("Inconsistent page numbers"));
+    }
+
+    #[test]
+    fn test_error_inconsistent_page_numbers_debug() {
+        let err = PageNumberError::InconsistentPageNumbers;
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("InconsistentPageNumbers"));
+    }
+
+    #[test]
+    fn test_error_io_error_display() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
+        let err = PageNumberError::IoError(io_err);
+        let msg = format!("{}", err);
+        assert!(msg.contains("IO error"));
+    }
+
+    #[test]
+    fn test_error_io_error_debug() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let err = PageNumberError::IoError(io_err);
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("IoError"));
+    }
+
+    #[test]
+    fn test_error_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "page image not found");
+        let page_err: PageNumberError = io_err.into();
+        let msg = format!("{}", page_err);
+        assert!(msg.contains("IO error"));
+    }
+
+    #[test]
+    fn test_error_all_variants_debug() {
+        let errors: Vec<PageNumberError> = vec![
+            PageNumberError::ImageNotFound(PathBuf::from("/test.png")),
+            PageNumberError::OcrFailed("failed".to_string()),
+            PageNumberError::NoPageNumbersDetected,
+            PageNumberError::InconsistentPageNumbers,
+            PageNumberError::IoError(std::io::Error::new(std::io::ErrorKind::Other, "io")),
+        ];
+
+        for err in &errors {
+            let debug = format!("{:?}", err);
+            assert!(!debug.is_empty());
+            let display = format!("{}", err);
+            assert!(!display.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_offset_correction_with_multiple_pages() {
+        let correction = OffsetCorrection {
+            page_offsets: vec![(0, 10), (1, 20), (2, 30)],
+            unified_offset: 20,
+        };
+        assert_eq!(correction.page_offsets.len(), 3);
+        assert_eq!(correction.unified_offset, 20);
+    }
+
+    #[test]
+    fn test_analysis_missing_pages() {
+        let analysis = PageNumberAnalysis {
+            detections: vec![],
+            position_pattern: PageNumberPosition::BottomCenter,
+            odd_page_offset_x: 0,
+            even_page_offset_x: 0,
+            overall_confidence: 0.0,
+            missing_pages: vec![1, 3, 5],
+            duplicate_pages: vec![],
+        };
+        assert_eq!(analysis.missing_pages.len(), 3);
+        assert!(analysis.missing_pages.contains(&1));
+    }
+
+    #[test]
+    fn test_analysis_duplicate_pages() {
+        let analysis = PageNumberAnalysis {
+            detections: vec![],
+            position_pattern: PageNumberPosition::TopOutside,
+            odd_page_offset_x: 0,
+            even_page_offset_x: 0,
+            overall_confidence: 0.0,
+            missing_pages: vec![],
+            duplicate_pages: vec![2, 4],
+        };
+        assert_eq!(analysis.duplicate_pages.len(), 2);
+        assert!(analysis.duplicate_pages.contains(&2));
+    }
+
+    #[test]
+    fn test_detected_page_number_raw_text() {
+        let detection = DetectedPageNumber {
+            page_index: 5,
+            number: Some(42),
+            position: PageNumberRect {
+                x: 100,
+                y: 900,
+                width: 50,
+                height: 30,
+            },
+            confidence: 0.95,
+            raw_text: "42".to_string(),
+        };
+        assert_eq!(detection.raw_text, "42");
+        assert_eq!(detection.number, Some(42));
+        assert!(detection.confidence > 0.9);
+    }
 }

@@ -1184,4 +1184,125 @@ mod tests {
             assert_eq!(page.has_text, has_text);
         }
     }
+
+    // ============================================================
+    // Error handling tests
+    // ============================================================
+
+    #[test]
+    fn test_error_file_not_found_display() {
+        let path = PathBuf::from("/test/missing.pdf");
+        let err = PdfReaderError::FileNotFound(path);
+        let msg = format!("{}", err);
+        assert!(msg.contains("File not found"));
+        assert!(msg.contains("missing.pdf"));
+    }
+
+    #[test]
+    fn test_error_file_not_found_debug() {
+        let path = PathBuf::from("/test/missing.pdf");
+        let err = PdfReaderError::FileNotFound(path);
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("FileNotFound"));
+    }
+
+    #[test]
+    fn test_error_invalid_format_display() {
+        let err = PdfReaderError::InvalidFormat("not a PDF".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("Invalid PDF format"));
+        assert!(msg.contains("not a PDF"));
+    }
+
+    #[test]
+    fn test_error_invalid_format_debug() {
+        let err = PdfReaderError::InvalidFormat("corrupted header".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("InvalidFormat"));
+    }
+
+    #[test]
+    fn test_error_encrypted_pdf_display() {
+        let err = PdfReaderError::EncryptedPdf;
+        let msg = format!("{}", err);
+        assert!(msg.contains("Encrypted PDF not supported"));
+    }
+
+    #[test]
+    fn test_error_encrypted_pdf_debug() {
+        let err = PdfReaderError::EncryptedPdf;
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("EncryptedPdf"));
+    }
+
+    #[test]
+    fn test_error_io_error_display() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
+        let err = PdfReaderError::IoError(io_err);
+        let msg = format!("{}", err);
+        assert!(msg.contains("IO error"));
+    }
+
+    #[test]
+    fn test_error_io_error_debug() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let err = PdfReaderError::IoError(io_err);
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("IoError"));
+    }
+
+    #[test]
+    fn test_error_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "pdf not found");
+        let pdf_err: PdfReaderError = io_err.into();
+        let msg = format!("{}", pdf_err);
+        assert!(msg.contains("IO error"));
+    }
+
+    #[test]
+    fn test_error_parse_error_display() {
+        let err = PdfReaderError::ParseError("invalid object reference".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("PDF parse error"));
+        assert!(msg.contains("invalid object reference"));
+    }
+
+    #[test]
+    fn test_error_parse_error_debug() {
+        let err = PdfReaderError::ParseError("malformed stream".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("ParseError"));
+    }
+
+    #[test]
+    fn test_error_all_variants_debug_display() {
+        let errors: Vec<PdfReaderError> = vec![
+            PdfReaderError::FileNotFound(PathBuf::from("/test.pdf")),
+            PdfReaderError::InvalidFormat("bad format".to_string()),
+            PdfReaderError::EncryptedPdf,
+            PdfReaderError::IoError(std::io::Error::new(std::io::ErrorKind::Other, "io")),
+            PdfReaderError::ParseError("parse fail".to_string()),
+        ];
+
+        for err in &errors {
+            let debug = format!("{:?}", err);
+            assert!(!debug.is_empty());
+            let display = format!("{}", err);
+            assert!(!display.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_error_invalid_format_empty_message() {
+        let err = PdfReaderError::InvalidFormat(String::new());
+        let msg = format!("{}", err);
+        assert!(msg.contains("Invalid PDF format"));
+    }
+
+    #[test]
+    fn test_error_parse_error_special_chars() {
+        let err = PdfReaderError::ParseError("line: 42, col: 10".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("line: 42"));
+    }
 }

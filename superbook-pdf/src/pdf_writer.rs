@@ -1399,4 +1399,126 @@ mod tests {
             assert!(!display.is_empty());
         }
     }
+
+    // ============================================================
+    // Additional Error handling tests
+    // ============================================================
+
+    #[test]
+    fn test_error_no_images_display() {
+        let err = PdfWriterError::NoImages;
+        let msg = format!("{}", err);
+        assert!(msg.contains("No images provided"));
+    }
+
+    #[test]
+    fn test_error_no_images_debug() {
+        let err = PdfWriterError::NoImages;
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("NoImages"));
+    }
+
+    #[test]
+    fn test_error_image_not_found_display() {
+        let path = PathBuf::from("/test/missing_image.png");
+        let err = PdfWriterError::ImageNotFound(path);
+        let msg = format!("{}", err);
+        assert!(msg.contains("Image not found"));
+        assert!(msg.contains("missing_image.png"));
+    }
+
+    #[test]
+    fn test_error_image_not_found_debug() {
+        let path = PathBuf::from("/test/missing.png");
+        let err = PdfWriterError::ImageNotFound(path);
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("ImageNotFound"));
+    }
+
+    #[test]
+    fn test_error_unsupported_format_display() {
+        let err = PdfWriterError::UnsupportedFormat("HEIC".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("Unsupported image format"));
+        assert!(msg.contains("HEIC"));
+    }
+
+    #[test]
+    fn test_error_unsupported_format_debug() {
+        let err = PdfWriterError::UnsupportedFormat("WEBP".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("UnsupportedFormat"));
+    }
+
+    #[test]
+    fn test_error_io_error_display() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
+        let err = PdfWriterError::IoError(io_err);
+        let msg = format!("{}", err);
+        assert!(msg.contains("IO error"));
+    }
+
+    #[test]
+    fn test_error_io_error_debug() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "output not found");
+        let err = PdfWriterError::IoError(io_err);
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("IoError"));
+    }
+
+    #[test]
+    fn test_error_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::WriteZero, "disk full");
+        let writer_err: PdfWriterError = io_err.into();
+        let msg = format!("{}", writer_err);
+        assert!(msg.contains("IO error"));
+    }
+
+    #[test]
+    fn test_error_generation_error_display() {
+        let err = PdfWriterError::GenerationError("font embedding failed".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("PDF generation error"));
+        assert!(msg.contains("font embedding failed"));
+    }
+
+    #[test]
+    fn test_error_generation_error_debug() {
+        let err = PdfWriterError::GenerationError("image compression failed".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("GenerationError"));
+    }
+
+    #[test]
+    fn test_error_all_variants_debug_impl() {
+        let errors: Vec<PdfWriterError> = vec![
+            PdfWriterError::NoImages,
+            PdfWriterError::ImageNotFound(PathBuf::from("/test.png")),
+            PdfWriterError::UnsupportedFormat("SVG".to_string()),
+            PdfWriterError::IoError(std::io::Error::new(std::io::ErrorKind::Other, "io")),
+            PdfWriterError::GenerationError("gen fail".to_string()),
+        ];
+
+        for err in &errors {
+            let debug = format!("{:?}", err);
+            assert!(!debug.is_empty());
+            let display = format!("{}", err);
+            assert!(!display.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_error_unsupported_format_empty() {
+        let err = PdfWriterError::UnsupportedFormat(String::new());
+        let msg = format!("{}", err);
+        assert!(msg.contains("Unsupported image format"));
+    }
+
+    #[test]
+    fn test_error_generation_error_with_details() {
+        let err = PdfWriterError::GenerationError("page 5: overflow at 0x1234".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("page 5"));
+        assert!(msg.contains("0x1234"));
+    }
 }
