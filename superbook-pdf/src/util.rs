@@ -105,13 +105,13 @@ pub fn mm_to_pixels(mm: f32, dpi: u32) -> u32 {
 /// Convert points to millimeters
 #[inline]
 pub fn points_to_mm(points: f64) -> f32 {
-    (points / POINTS_PER_INCH * MM_PER_INCH as f64) as f32
+    (points / POINTS_PER_INCH * f64::from(MM_PER_INCH)) as f32
 }
 
 /// Convert millimeters to points
 #[inline]
 pub fn mm_to_points(mm: f32) -> f64 {
-    (mm as f64 / MM_PER_INCH as f64) * POINTS_PER_INCH
+    (f64::from(mm) / f64::from(MM_PER_INCH)) * POINTS_PER_INCH
 }
 
 /// Format file size in human-readable format
