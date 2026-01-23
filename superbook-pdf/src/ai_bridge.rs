@@ -1000,4 +1000,210 @@ mod tests {
         assert_eq!(config.retry_interval, Duration::from_secs(2));
         assert!(!config.exponential_backoff);
     }
+
+    // TC-AIB-009: Async progress simulation
+    #[test]
+    fn test_progress_status_sequence() {
+        // Simulate progress sequence as would be observed in async execution
+        let statuses = vec![
+            ProcessStatus::Preparing,
+            ProcessStatus::Running { progress: 0.0 },
+            ProcessStatus::Running { progress: 0.25 },
+            ProcessStatus::Running { progress: 0.5 },
+            ProcessStatus::Running { progress: 0.75 },
+            ProcessStatus::Running { progress: 1.0 },
+            ProcessStatus::Completed {
+                duration: Duration::from_secs(10),
+            },
+        ];
+
+        assert!(matches!(statuses[0], ProcessStatus::Preparing));
+        assert!(matches!(statuses[6], ProcessStatus::Completed { .. }));
+
+        // Check progress increases monotonically
+        let mut prev_progress = -1.0;
+        for status in statuses.iter().skip(1).take(5) {
+            if let ProcessStatus::Running { progress } = status {
+                assert!(*progress > prev_progress);
+                prev_progress = *progress;
+            }
+        }
+    }
+
+    // Test RetriesExhausted error
+    #[test]
+    fn test_retries_exhausted_error() {
+        let err = AiBridgeError::RetriesExhausted;
+        let msg = err.to_string().to_lowercase();
+        assert!(msg.contains("retries") || msg.contains("exhausted"));
+    }
+
+    // Test ToolNotInstalled error
+    #[test]
+    fn test_tool_not_installed_error() {
+        let err = AiBridgeError::ToolNotInstalled(AiTool::RealESRGAN);
+        let msg = err.to_string().to_lowercase();
+        assert!(msg.contains("not installed") || msg.contains("tool"));
+    }
+
+    // Test batch result with mixed outcomes
+    #[test]
+    fn test_batch_result_mixed_outcomes() {
+        let result = AiTaskResult {
+            processed_files: vec![PathBuf::from("success1.png"), PathBuf::from("success2.png")],
+            skipped_files: vec![(PathBuf::from("skip.png"), "Already processed".to_string())],
+            failed_files: vec![
+                (PathBuf::from("fail1.png"), "Corrupted image".to_string()),
+                (PathBuf::from("fail2.png"), "Out of memory".to_string()),
+            ],
+            duration: Duration::from_secs(120),
+            gpu_stats: Some(GpuStats {
+                peak_vram_mb: 3500,
+                avg_utilization: 68.5,
+            }),
+        };
+
+        // Verify counts
+        assert_eq!(result.processed_files.len(), 2);
+        assert_eq!(result.skipped_files.len(), 1);
+        assert_eq!(result.failed_files.len(), 2);
+
+        // Verify error messages are preserved
+        assert!(result.failed_files[0].1.contains("Corrupted"));
+        assert!(result.failed_files[1].1.contains("memory"));
+
+        // Verify skip reason
+        assert!(result.skipped_files[0].1.contains("Already"));
+    }
+
+    // Test GPU config disabled
+    #[test]
+    fn test_gpu_config_disabled() {
+        let config = AiBridgeConfig::cpu_only();
+        assert!(!config.gpu_config.enabled);
+        assert!(config.gpu_config.device_id.is_none());
+    }
+
+    // Test GPU config with specific device
+    #[test]
+    fn test_gpu_config_specific_device() {
+        let gpu_config = GpuConfig {
+            enabled: true,
+            device_id: Some(2),
+            max_vram_mb: Some(6144),
+            tile_size: Some(384),
+        };
+
+        assert!(gpu_config.enabled);
+        assert_eq!(gpu_config.device_id, Some(2));
+        assert_eq!(gpu_config.max_vram_mb, Some(6144));
+        assert_eq!(gpu_config.tile_size, Some(384));
+    }
+
+    // Test exponential backoff calculation edge cases
+    #[test]
+    fn test_exponential_backoff_edge_cases() {
+        let config = RetryConfig {
+            max_retries: 6,
+            retry_interval: Duration::from_millis(100),
+            exponential_backoff: true,
+        };
+
+        // Verify exponential growth
+        let base = config.retry_interval;
+        assert_eq!(base * 2_u32.pow(0), Duration::from_millis(100)); // 100ms
+        assert_eq!(base * 2_u32.pow(1), Duration::from_millis(200)); // 200ms
+        assert_eq!(base * 2_u32.pow(2), Duration::from_millis(400)); // 400ms
+        assert_eq!(base * 2_u32.pow(3), Duration::from_millis(800)); // 800ms
+        assert_eq!(base * 2_u32.pow(4), Duration::from_millis(1600)); // 1.6s
+        assert_eq!(base * 2_u32.pow(5), Duration::from_millis(3200)); // 3.2s
+    }
+
+    // Test AiTool variants completeness
+    #[test]
+    fn test_ai_tool_all_variants() {
+        let tools = [AiTool::RealESRGAN, AiTool::YomiToku];
+
+        for tool in tools {
+            let module_name = tool.module_name();
+            assert!(!module_name.is_empty());
+        }
+    }
+
+    // Test LogLevel default
+    #[test]
+    fn test_log_level_default() {
+        let default_level = LogLevel::default();
+        assert!(matches!(default_level, LogLevel::Info));
+    }
+
+    // Test builder with all options
+    #[test]
+    fn test_builder_full_configuration() {
+        let config = AiBridgeConfig::builder()
+            .venv_path("/opt/ai/venv")
+            .gpu_enabled(true)
+            .gpu_device(1)
+            .timeout(Duration::from_secs(1800))
+            .max_retries(5)
+            .log_level(LogLevel::Debug)
+            .build();
+
+        assert_eq!(config.venv_path, PathBuf::from("/opt/ai/venv"));
+        assert!(config.gpu_config.enabled);
+        assert_eq!(config.gpu_config.device_id, Some(1));
+        assert_eq!(config.timeout, Duration::from_secs(1800));
+        assert_eq!(config.retry_config.max_retries, 5);
+        assert!(matches!(config.log_level, LogLevel::Debug));
+    }
+
+    // Test ProcessStatus failed with high retry count
+    #[test]
+    fn test_process_status_failed_max_retries() {
+        let failed = ProcessStatus::Failed {
+            error: "Persistent failure".to_string(),
+            retries: 10,
+        };
+
+        if let ProcessStatus::Failed { error, retries } = failed {
+            assert_eq!(retries, 10);
+            assert!(error.contains("Persistent"));
+        }
+    }
+
+    // Test GpuStats edge values
+    #[test]
+    fn test_gpu_stats_edge_values() {
+        // Zero values
+        let zero_stats = GpuStats {
+            peak_vram_mb: 0,
+            avg_utilization: 0.0,
+        };
+        assert_eq!(zero_stats.peak_vram_mb, 0);
+        assert_eq!(zero_stats.avg_utilization, 0.0);
+
+        // Maximum values
+        let max_stats = GpuStats {
+            peak_vram_mb: 48000, // 48GB
+            avg_utilization: 100.0,
+        };
+        assert_eq!(max_stats.peak_vram_mb, 48000);
+        assert_eq!(max_stats.avg_utilization, 100.0);
+    }
+
+    // Test config timeout variations
+    #[test]
+    fn test_config_timeout_variations() {
+        // Very short timeout
+        let short = AiBridgeConfig::builder()
+            .timeout(Duration::from_millis(100))
+            .build();
+        assert_eq!(short.timeout, Duration::from_millis(100));
+
+        // Very long timeout (24 hours)
+        let long = AiBridgeConfig::builder()
+            .timeout(Duration::from_secs(86400))
+            .build();
+        assert_eq!(long.timeout, Duration::from_secs(86400));
+    }
 }
