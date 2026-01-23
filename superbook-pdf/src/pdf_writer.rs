@@ -262,8 +262,16 @@ impl PrintPdfWriter {
         // Add first image to first page
         Self::add_image_to_layer(&doc, page1, layer1, &first_img, width_mm, height_mm)?;
 
+        // Add OCR text layer for first page if available
+        if let Some(ref ocr_layer) = options.ocr_layer {
+            if let Some(page_text) = ocr_layer.pages.iter().find(|p| p.page_index == 0) {
+                let text_layer = doc.get_page(page1).add_layer("OCR Text");
+                Self::add_ocr_text(&doc, text_layer, page_text, height_mm)?;
+            }
+        }
+
         // Add remaining images
-        for img_path in images.iter().skip(1) {
+        for (img_idx, img_path) in images.iter().enumerate().skip(1) {
             let img = image::open(img_path)
                 .map_err(|e| PdfWriterError::GenerationError(e.to_string()))?;
 
@@ -289,6 +297,14 @@ impl PrintPdfWriter {
             let (page, layer) = doc.add_page(printpdf::Mm(w_mm), printpdf::Mm(h_mm), "Layer 1");
 
             Self::add_image_to_layer(&doc, page, layer, &img, w_mm, h_mm)?;
+
+            // Add OCR text layer if available
+            if let Some(ref ocr_layer) = options.ocr_layer {
+                if let Some(page_text) = ocr_layer.pages.iter().find(|p| p.page_index == img_idx) {
+                    let text_layer = doc.get_page(page).add_layer("OCR Text");
+                    Self::add_ocr_text(&doc, text_layer, page_text, h_mm)?;
+                }
+            }
         }
 
         // Save PDF
@@ -319,6 +335,40 @@ impl PrintPdfWriter {
         // 2. Encode as JPEG with specified quality
         // 3. Create printpdf::Image from bytes
         // 4. Add image to layer at position (0,0) with correct scaling
+
+        Ok(())
+    }
+
+    /// Add OCR text layer to a PDF page
+    ///
+    /// The text is rendered as invisible (searchable) text over the image.
+    fn add_ocr_text(
+        doc: &printpdf::PdfDocumentReference,
+        layer: printpdf::PdfLayerReference,
+        page_text: &OcrPageText,
+        page_height_mm: f32,
+    ) -> Result<()> {
+        use printpdf::Mm;
+
+        // Load built-in font for OCR text
+        // Using a CJK font for Japanese text support
+        let font = doc
+            .add_builtin_font(printpdf::BuiltinFont::Helvetica)
+            .map_err(|e| PdfWriterError::GenerationError(e.to_string()))?;
+
+        for block in &page_text.blocks {
+            // Convert points to mm (1 point = 0.3527777... mm)
+            let x_mm = block.x as f32 * 0.352778;
+            // PDF coordinate system has origin at bottom-left, so flip y
+            let y_mm = page_height_mm - (block.y as f32 * 0.352778) - (block.height as f32 * 0.352778);
+            let font_size_pt = block.font_size as f32;
+
+            // Set text rendering mode to invisible (mode 3)
+            // This makes text searchable but not visible
+            layer.set_text_rendering_mode(printpdf::TextRenderingMode::Invisible);
+
+            layer.use_text(&block.text, font_size_pt, Mm(x_mm), Mm(y_mm), &font);
+        }
 
         Ok(())
     }

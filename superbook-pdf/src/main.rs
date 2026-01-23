@@ -11,6 +11,7 @@ use superbook_pdf::{
     PdfWriterOptions, PrintPdfWriter, RealEsrgan, RealEsrganOptions, SubprocessBridge,
     YomiToku, YomiTokuOptions,
 };
+use superbook_pdf::pdf_writer::{OcrLayer, OcrPageText, TextBlock};
 
 fn main() {
     let cli = Cli::parse();
@@ -418,13 +419,49 @@ fn process_single_pdf(
     }
     let output_pdf = args.output.join(format!("{}_converted.pdf", pdf_name));
 
-    let pdf_options = PdfWriterOptions::builder()
-        .dpi(args.dpi)
-        .metadata(reader.info.metadata.clone())
-        .build();
+    // Convert OCR results to OcrLayer
+    let ocr_layer = if !ocr_results.is_empty() {
+        let pages: Vec<OcrPageText> = ocr_results
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, result)| {
+                result.as_ref().map(|r| OcrPageText {
+                    page_index: idx,
+                    blocks: r
+                        .text_blocks
+                        .iter()
+                        .map(|b| TextBlock {
+                            x: b.bbox.0 as f64,
+                            y: b.bbox.1 as f64,
+                            width: (b.bbox.2 - b.bbox.0) as f64,
+                            height: (b.bbox.3 - b.bbox.1) as f64,
+                            text: b.text.clone(),
+                            font_size: b.font_size.unwrap_or(12.0) as f64,
+                            vertical: matches!(b.direction, superbook_pdf::TextDirection::Vertical),
+                        })
+                        .collect(),
+                })
+            })
+            .collect();
 
-    // TODO: Pass OCR results to PDF writer when OCR layer support is fully implemented
-    let _ = ocr_results; // Suppress unused warning for now
+        if pages.is_empty() {
+            None
+        } else {
+            Some(OcrLayer { pages })
+        }
+    } else {
+        None
+    };
+
+    let mut pdf_builder = PdfWriterOptions::builder()
+        .dpi(args.dpi)
+        .metadata(reader.info.metadata.clone());
+
+    if let Some(layer) = ocr_layer {
+        pdf_builder = pdf_builder.ocr_layer(layer);
+    }
+
+    let pdf_options = pdf_builder.build();
 
     PrintPdfWriter::create_from_images(&images_for_pdf, &output_pdf, &pdf_options)?;
 
