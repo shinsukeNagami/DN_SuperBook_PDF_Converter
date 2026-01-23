@@ -226,6 +226,7 @@ mod tests {
         Cli::command().debug_assert();
     }
 
+    // TC-CLI-001: ヘルプ表示
     #[test]
     fn test_help_display() {
         let mut cmd = Cli::command();
@@ -234,6 +235,7 @@ mod tests {
         assert!(help.contains("convert"));
     }
 
+    // TC-CLI-002: バージョン表示
     #[test]
     fn test_version_display() {
         let cmd = Cli::command();
@@ -241,6 +243,7 @@ mod tests {
         assert!(!version.is_empty());
     }
 
+    // TC-CLI-003: 入力ファイルなしエラー
     #[test]
     fn test_missing_input_error() {
         let result = Cli::try_parse_from(["superbook-pdf", "convert"]);
@@ -249,6 +252,15 @@ mod tests {
         assert!(err.to_string().contains("required"));
     }
 
+    // TC-CLI-004: 存在しないファイルエラー（パース時はエラーにならない、実行時にチェック）
+    #[test]
+    fn test_nonexistent_file_parse() {
+        // Note: CLI parsing accepts any path, existence check is at runtime
+        let result = Cli::try_parse_from(["superbook-pdf", "convert", "/nonexistent/file.pdf"]);
+        assert!(result.is_ok()); // Parsing succeeds
+    }
+
+    // TC-CLI-005: オプション解析
     #[test]
     fn test_option_parsing() {
         let cli = Cli::try_parse_from([
@@ -273,6 +285,7 @@ mod tests {
         }
     }
 
+    // TC-CLI-006: デフォルト値
     #[test]
     fn test_default_values() {
         let cli = Cli::try_parse_from(["superbook-pdf", "convert", "input.pdf"]).unwrap();
