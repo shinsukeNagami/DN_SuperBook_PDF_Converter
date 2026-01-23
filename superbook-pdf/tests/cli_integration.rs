@@ -332,3 +332,148 @@ fn test_convert_dry_run_no_gpu() {
         .success()
         .stdout(predicate::str::contains("GPU: NO"));
 }
+
+// ==================== Additional Edge Case Tests ====================
+
+// Test multiple files in directory
+#[test]
+fn test_convert_dry_run_multiple_files() {
+    // fixtures directory contains multiple PDFs
+    superbook_cmd()
+        .args(["convert", "tests/fixtures", "/tmp/out", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Files to process:"));
+}
+
+// Test combined options
+#[test]
+fn test_convert_dry_run_all_options_enabled() {
+    superbook_cmd()
+        .args([
+            "convert",
+            "tests/fixtures/sample.pdf",
+            "/tmp/out",
+            "--dry-run",
+            "--dpi",
+            "600",
+            "--deskew=true",
+            "--upscale=true",
+            "--gpu=true",
+            "--ocr",
+            "--margin-trim",
+            "2.0",
+            "-t",
+            "8",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("DPI: 600"))
+        .stdout(predicate::str::contains("Deskew Correction: ENABLED"))
+        .stdout(predicate::str::contains("AI Upscaling (RealESRGAN"))
+        .stdout(predicate::str::contains("GPU: YES"))
+        .stdout(predicate::str::contains("OCR (YomiToku): ENABLED"))
+        .stdout(predicate::str::contains("Threads: 8"));
+}
+
+// Test all options disabled
+#[test]
+fn test_convert_dry_run_all_options_disabled() {
+    superbook_cmd()
+        .args([
+            "convert",
+            "tests/fixtures/sample.pdf",
+            "/tmp/out",
+            "--dry-run",
+            "--no-deskew",
+            "--no-upscale",
+            "--no-gpu",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Deskew Correction: DISABLED"))
+        .stdout(predicate::str::contains("AI Upscaling: DISABLED"))
+        .stdout(predicate::str::contains("GPU: NO"));
+}
+
+// Test invalid DPI value (too low)
+#[test]
+fn test_convert_invalid_dpi_zero() {
+    superbook_cmd()
+        .args([
+            "convert",
+            "tests/fixtures/sample.pdf",
+            "/tmp/out",
+            "--dpi",
+            "0",
+        ])
+        .assert()
+        .failure();
+}
+
+// Test negative margin trim
+#[test]
+fn test_convert_negative_margin() {
+    superbook_cmd()
+        .args([
+            "convert",
+            "tests/fixtures/sample.pdf",
+            "/tmp/out",
+            "--margin-trim",
+            "-1.0",
+        ])
+        .assert()
+        .failure();
+}
+
+// Test info subcommand help
+#[test]
+fn test_info_command_help() {
+    superbook_cmd()
+        .args(["info", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("system information"));
+}
+
+// Test short flags combined
+#[test]
+fn test_convert_short_flags_combined() {
+    superbook_cmd()
+        .args([
+            "convert",
+            "tests/fixtures/sample.pdf",
+            "/tmp/out",
+            "--dry-run",
+            "-o", // OCR
+            "-m",
+            "1.5", // margin
+            "-t",
+            "2", // threads
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("OCR (YomiToku): ENABLED"))
+        .stdout(predicate::str::contains("Threads: 2"));
+}
+
+// Test unknown command
+#[test]
+fn test_unknown_command() {
+    superbook_cmd()
+        .args(["unknown"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
+}
+
+// Test missing required argument (OUTPUT defaults to current directory)
+#[test]
+fn test_convert_with_single_arg() {
+    // When only input is provided, output defaults to current directory
+    // This should fail because of IO error (can't write to /tmp in some cases)
+    superbook_cmd()
+        .args(["convert", "/nonexistent/input.pdf"])
+        .assert()
+        .failure();
+}
