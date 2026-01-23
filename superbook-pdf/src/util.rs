@@ -512,4 +512,259 @@ mod tests {
         // One byte less than GB
         assert_eq!(format_file_size(exactly_gb - 1), "1024.00 MB");
     }
+
+    // ============ Concurrency Tests ============
+
+    #[test]
+    fn test_format_file_size_thread_safe() {
+        use std::thread;
+
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                thread::spawn(move || {
+                    let size = 1024u64.pow(i % 4); // B, KB, MB, GB
+                    format_file_size(size)
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(results.len(), 8);
+    }
+
+    #[test]
+    fn test_format_duration_thread_safe() {
+        use std::thread;
+        use std::time::Duration;
+
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                thread::spawn(move || {
+                    let duration = Duration::from_secs(i * 100);
+                    format_duration(duration)
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(results.len(), 8);
+    }
+
+    #[test]
+    fn test_conversion_functions_thread_safe() {
+        use std::thread;
+
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                thread::spawn(move || {
+                    let dpi = 150 + (i as u32 * 50);
+                    let px = mm_to_pixels(100.0, dpi);
+                    let mm = pixels_to_mm(px, dpi);
+                    (px, mm)
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(results.len(), 8);
+        for (_, mm) in &results {
+            // Roundtrip should be close
+            assert!((*mm - 100.0).abs() < 1.0);
+        }
+    }
+
+    #[test]
+    fn test_clamp_thread_safe() {
+        use rayon::prelude::*;
+
+        let results: Vec<_> = (0..1000)
+            .into_par_iter()
+            .map(|i| clamp(i as i32, 100, 900))
+            .collect();
+
+        assert_eq!(results.len(), 1000);
+        for (i, &val) in results.iter().enumerate() {
+            if i < 100 {
+                assert_eq!(val, 100);
+            } else if i > 900 {
+                assert_eq!(val, 900);
+            } else {
+                assert_eq!(val, i as i32);
+            }
+        }
+    }
+
+    #[test]
+    fn test_percentage_thread_safe() {
+        use rayon::prelude::*;
+
+        let results: Vec<_> = (0..=100)
+            .into_par_iter()
+            .map(|i| percentage(i, 100))
+            .collect();
+
+        assert_eq!(results.len(), 101);
+        for (i, &pct) in results.iter().enumerate() {
+            // Use approximate comparison due to floating point precision
+            assert!(
+                (pct - i as f32).abs() < 0.001,
+                "Expected {} but got {}",
+                i,
+                pct
+            );
+        }
+    }
+
+    // ============ Additional Boundary Tests ============
+
+    #[test]
+    fn test_pixels_to_mm_one_pixel() {
+        // Single pixel at various DPIs
+        let mm_72 = pixels_to_mm(1, 72);
+        let mm_300 = pixels_to_mm(1, 300);
+        let mm_600 = pixels_to_mm(1, 600);
+
+        assert!(mm_72 > mm_300);
+        assert!(mm_300 > mm_600);
+    }
+
+    #[test]
+    fn test_pixels_to_mm_max_dpi() {
+        // Very high DPI
+        let mm = pixels_to_mm(2400, 2400);
+        assert!((mm - 25.4).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_mm_to_pixels_fractional() {
+        // Fractional mm values
+        let px = mm_to_pixels(0.1, 300);
+        // 0.1 / 25.4 * 300 = 1.18 → 1
+        assert_eq!(px, 1);
+    }
+
+    #[test]
+    fn test_points_to_mm_large_value() {
+        // Large document (e.g., poster)
+        let mm = points_to_mm(2834.65); // 1000mm in points
+        assert!((mm - 1000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_mm_to_points_small_value() {
+        // Small value (0.1mm)
+        let pt = mm_to_points(0.1);
+        // 0.1 / 25.4 * 72 = 0.283
+        assert!((pt - 0.283).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_format_file_size_max_u64() {
+        // Maximum u64 value
+        let size = u64::MAX;
+        let result = format_file_size(size);
+        assert!(result.contains("GB"));
+    }
+
+    #[test]
+    fn test_format_duration_max_hours() {
+        use std::time::Duration;
+
+        // 999 hours
+        let duration = Duration::from_secs(999 * 3600 + 59 * 60);
+        let result = format_duration(duration);
+        assert_eq!(result, "999h 59m");
+    }
+
+    #[test]
+    fn test_format_duration_subsec_only() {
+        use std::time::Duration;
+
+        // 999 ms
+        let duration = Duration::from_millis(999);
+        assert_eq!(format_duration(duration), "999ms");
+    }
+
+    #[test]
+    fn test_clamp_with_u8() {
+        assert_eq!(clamp(0u8, 10, 200), 10);
+        assert_eq!(clamp(255u8, 10, 200), 200);
+        assert_eq!(clamp(128u8, 10, 200), 128);
+    }
+
+    #[test]
+    fn test_clamp_with_i64() {
+        assert_eq!(clamp(i64::MIN, -100, 100), -100);
+        assert_eq!(clamp(i64::MAX, -100, 100), 100);
+        assert_eq!(clamp(0i64, -100, 100), 0);
+    }
+
+    #[test]
+    fn test_percentage_boundary_values() {
+        // Zero total
+        assert_eq!(percentage(0, 0), 0.0);
+        assert_eq!(percentage(100, 0), 0.0);
+
+        // Large values
+        assert_eq!(percentage(usize::MAX / 2, usize::MAX / 2), 100.0);
+    }
+
+    #[test]
+    fn test_ensure_dir_writable_existing_file() {
+        // Try to ensure writable on a path that exists as a file
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("file.txt");
+        std::fs::write(&file_path, b"test").unwrap();
+
+        // This should fail because file_path is a file, not a directory
+        let result = ensure_dir_writable(&file_path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_image_error_message_contains_path() {
+        let path = "/nonexistent/path/to/image.png";
+        let result = load_image(path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains(path));
+    }
+
+    #[test]
+    fn test_ensure_file_exists_error_message_contains_path() {
+        let path = "/nonexistent/path/to/file.txt";
+        let result = ensure_file_exists(path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains(path));
+    }
+
+    #[test]
+    fn test_pixels_mm_consistency_across_dpis() {
+        // 1 inch should always be 25.4mm regardless of DPI
+        let dpis = [72, 96, 150, 300, 600, 1200];
+        for dpi in dpis {
+            let mm = pixels_to_mm(dpi, dpi);
+            assert!(
+                (mm - 25.4).abs() < 0.01,
+                "Failed for DPI {}: expected 25.4, got {}",
+                dpi,
+                mm
+            );
+        }
+    }
+
+    #[test]
+    fn test_points_mm_bidirectional() {
+        // Test multiple values for bidirectional consistency
+        let mm_values = [0.0, 1.0, 10.0, 25.4, 100.0, 297.0, 1000.0];
+        for &mm in &mm_values {
+            let points = mm_to_points(mm);
+            let back = points_to_mm(points);
+            assert!(
+                (mm - back).abs() < 0.01,
+                "Roundtrip failed for mm={}: got {}",
+                mm,
+                back
+            );
+        }
+    }
 }
