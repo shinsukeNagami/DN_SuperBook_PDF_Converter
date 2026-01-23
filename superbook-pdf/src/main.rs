@@ -17,7 +17,7 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Convert(args) => run_convert(args),
+        Commands::Convert(args) => run_convert(&args),
         Commands::Info => run_info(),
     };
 
@@ -30,7 +30,7 @@ fn main() {
     });
 }
 
-fn run_convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn run_convert(args: &ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
     let start_time = Instant::now();
 
     // Validate input path
@@ -47,7 +47,7 @@ fn run_convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if args.dry_run {
-        print_execution_plan(&args, &pdf_files);
+        print_execution_plan(args, &pdf_files);
         return Ok(());
     }
 
@@ -67,7 +67,7 @@ fn run_convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
             );
         }
 
-        process_single_pdf(pdf_path, &args)?;
+        process_single_pdf(pdf_path, args)?;
     }
 
     let elapsed = start_time.elapsed();
@@ -459,7 +459,7 @@ fn process_single_pdf(
 
     let mut pdf_builder = PdfWriterOptions::builder()
         .dpi(args.dpi)
-        .metadata(reader.info.metadata.clone());
+        .metadata(reader.info.metadata);
 
     if let Some(layer) = ocr_layer {
         pdf_builder = pdf_builder.ocr_layer(layer);

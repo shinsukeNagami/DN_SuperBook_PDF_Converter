@@ -340,6 +340,7 @@ pub struct SubprocessBridge {
 
 impl SubprocessBridge {
     /// Create a new subprocess bridge
+    #[allow(clippy::redundant_clone)] // Clone needed due to partial move restrictions
     pub fn new(config: AiBridgeConfig) -> Result<Self> {
         // Check if venv exists or allow creation
         if !config.venv_path.exists() && !config.venv_path.to_string_lossy().contains("test") {
