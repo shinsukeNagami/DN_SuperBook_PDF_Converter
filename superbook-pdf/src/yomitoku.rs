@@ -1637,17 +1637,13 @@ mod tests {
 
     #[test]
     fn test_confidence_threshold_boundary_zero() {
-        let opts = YomiTokuOptions::builder()
-            .confidence_threshold(0.0)
-            .build();
+        let opts = YomiTokuOptions::builder().confidence_threshold(0.0).build();
         assert_eq!(opts.confidence_threshold, 0.0);
     }
 
     #[test]
     fn test_confidence_threshold_boundary_one() {
-        let opts = YomiTokuOptions::builder()
-            .confidence_threshold(1.0)
-            .build();
+        let opts = YomiTokuOptions::builder().confidence_threshold(1.0).build();
         assert_eq!(opts.confidence_threshold, 1.0);
     }
 
