@@ -1,6 +1,23 @@
 //! PDF Reader module
 //!
 //! Provides functionality to read PDF files and extract metadata.
+//!
+//! # Features
+//!
+//! - Read PDF files using lopdf
+//! - Extract page count, dimensions, and rotation
+//! - Extract metadata (title, author, etc.)
+//! - Detect encrypted PDFs
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use superbook_pdf::LopdfReader;
+//!
+//! let reader = LopdfReader::new("document.pdf").unwrap();
+//! println!("Pages: {}", reader.info.page_count);
+//! println!("Title: {:?}", reader.info.metadata.title);
+//! ```
 
 use lopdf::Document;
 use std::path::{Path, PathBuf};

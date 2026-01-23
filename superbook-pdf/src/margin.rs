@@ -1,6 +1,32 @@
 //! Margin Detection & Trimming module
 //!
 //! Provides functionality to detect and trim margins from scanned images.
+//!
+//! # Features
+//!
+//! - Multiple detection modes (Background, Edge, Histogram, Combined)
+//! - Unified margin calculation across multiple pages
+//! - Configurable trim percentages
+//! - Parallel processing support
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use superbook_pdf::{MarginOptions, ImageMarginDetector};
+//! use std::path::Path;
+//!
+//! let options = MarginOptions::builder()
+//!     .background_threshold(250)
+//!     .default_trim_percent(0.5)
+//!     .build();
+//!
+//! let detection = ImageMarginDetector::detect(
+//!     Path::new("page.png"),
+//!     &options
+//! ).unwrap();
+//!
+//! println!("Margins: top={}, bottom={}", detection.margins.top, detection.margins.bottom);
+//! ```
 
 use image::{GenericImageView, GrayImage};
 use rayon::prelude::*;

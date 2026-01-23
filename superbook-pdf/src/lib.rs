@@ -13,6 +13,7 @@
 //! - **Margin Detection** ([`margin`]) - Detect and trim page margins
 //! - **Page Number Detection** ([`page_number`]) - OCR-based page number recognition
 //! - **AI Bridge** ([`ai_bridge`]) - Python subprocess bridge for AI tools
+//! - **YomiToku OCR** ([`yomitoku`]) - Japanese AI-OCR for searchable PDFs
 //!
 //! # Quick Start
 //!
@@ -64,7 +65,33 @@
 //!                                    |
 //!                            AI Upscaling (RealESRGAN)
 //!                                    |
-//!                         Page Number Detection -> PDF Output
+//!                         Page Number Detection -> OCR -> PDF Output
+//! ```
+//!
+//! # Error Handling
+//!
+//! Each module has its own error type that can be matched for specific handling:
+//!
+//! - [`PdfReaderError`] - PDF reading errors
+//! - [`PdfWriterError`] - PDF writing errors
+//! - [`ExtractError`] - Image extraction errors
+//! - [`DeskewError`] - Deskew processing errors
+//! - [`MarginError`] - Margin detection errors
+//! - [`PageNumberError`] - Page number detection errors
+//! - [`AiBridgeError`] - AI tool communication errors
+//! - [`RealEsrganError`] - RealESRGAN upscaling errors
+//! - [`YomiTokuError`] - YomiToku OCR errors
+//!
+//! # CLI Exit Codes
+//!
+//! Use [`ExitCode`] for type-safe exit code handling:
+//!
+//! ```rust
+//! use superbook_pdf::ExitCode;
+//!
+//! let code = ExitCode::Success;
+//! assert_eq!(code.code(), 0);
+//! assert_eq!(code.description(), "Success");
 //! ```
 //!
 //! # License
@@ -92,17 +119,20 @@ pub use cli::{
     ExitCode,
 };
 pub use deskew::{
-    DeskewError, DeskewOptions, DeskewOptionsBuilder, DeskewResult, ImageProcDeskewer,
+    DeskewAlgorithm, DeskewError, DeskewOptions, DeskewOptionsBuilder, DeskewResult,
+    ImageProcDeskewer, QualityMode, SkewDetection,
 };
 pub use image_extract::{
-    ExtractError, ExtractOptions, ExtractOptionsBuilder, ExtractedPage, MagickExtractor,
+    ColorSpace, ExtractError, ExtractOptions, ExtractOptionsBuilder, ExtractedPage, ImageFormat,
+    MagickExtractor,
 };
 pub use margin::{
-    ImageMarginDetector, MarginDetection, MarginError, MarginOptions, MarginOptionsBuilder, Margins,
+    ContentDetectionMode, ContentRect, ImageMarginDetector, MarginDetection, MarginError,
+    MarginOptions, MarginOptionsBuilder, Margins, TrimResult, UnifiedMargins,
 };
 pub use page_number::{
-    DetectedPageNumber, PageNumberError, PageNumberOptions, PageNumberOptionsBuilder,
-    TesseractPageDetector,
+    DetectedPageNumber, OffsetCorrection, PageNumberAnalysis, PageNumberError, PageNumberOptions,
+    PageNumberOptionsBuilder, PageNumberPosition, PageNumberRect, TesseractPageDetector,
 };
 pub use pdf_reader::{LopdfReader, PdfDocument, PdfMetadata, PdfPage, PdfReaderError};
 pub use pdf_writer::{PdfWriterError, PdfWriterOptions, PdfWriterOptionsBuilder, PrintPdfWriter};

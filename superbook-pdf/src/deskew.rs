@@ -1,6 +1,32 @@
 //! Deskew (Skew Correction) module
 //!
 //! Provides functionality to detect and correct image skew/rotation.
+//!
+//! # Features
+//!
+//! - Multiple detection algorithms (Hough, Projection, Combined)
+//! - Configurable quality modes (Fast, Standard, High Quality)
+//! - Threshold-based correction skipping
+//! - Batch processing support
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use superbook_pdf::{DeskewOptions, ImageProcDeskewer};
+//! use std::path::Path;
+//!
+//! let options = DeskewOptions::builder()
+//!     .max_angle(15.0)
+//!     .threshold_angle(0.5)
+//!     .build();
+//!
+//! let detection = ImageProcDeskewer::detect_skew(
+//!     Path::new("scanned.png"),
+//!     &options
+//! ).unwrap();
+//!
+//! println!("Detected angle: {:.2}°", detection.angle);
+//! ```
 
 use image::{DynamicImage, GenericImageView, GrayImage, Rgba};
 use std::path::{Path, PathBuf};

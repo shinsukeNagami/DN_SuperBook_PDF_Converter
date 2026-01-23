@@ -1,6 +1,28 @@
 //! PDF Writer module
 //!
 //! Provides functionality to create PDF files from images.
+//!
+//! # Features
+//!
+//! - Create PDFs from image files (PNG, JPEG, etc.)
+//! - Configurable DPI and JPEG quality
+//! - Optional OCR text layer for searchable PDFs
+//! - Metadata embedding
+//! - Multiple page size modes
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use superbook_pdf::{PdfWriterOptions, PrintPdfWriter};
+//!
+//! let options = PdfWriterOptions::builder()
+//!     .dpi(300)
+//!     .jpeg_quality(90)
+//!     .build();
+//!
+//! let images = vec!["page1.png".into(), "page2.png".into()];
+//! PrintPdfWriter::create_from_images(&images, std::path::Path::new("output.pdf"), &options).unwrap();
+//! ```
 
 use crate::pdf_reader::PdfMetadata;
 use std::fs::File;
