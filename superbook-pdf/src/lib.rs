@@ -89,6 +89,7 @@ pub use ai_bridge::{
 };
 pub use cli::{
     create_page_progress_bar, create_progress_bar, create_spinner, Cli, Commands, ConvertArgs,
+    ExitCode,
 };
 pub use deskew::{
     DeskewError, DeskewOptions, DeskewOptionsBuilder, DeskewResult, ImageProcDeskewer,
@@ -106,23 +107,28 @@ pub use page_number::{
 pub use pdf_reader::{LopdfReader, PdfDocument, PdfMetadata, PdfPage, PdfReaderError};
 pub use pdf_writer::{PdfWriterError, PdfWriterOptions, PdfWriterOptionsBuilder, PrintPdfWriter};
 pub use realesrgan::{RealEsrgan, RealEsrganError, RealEsrganOptions, RealEsrganOptionsBuilder};
-pub use yomitoku::{
-    BatchOcrResult, OcrResult, TextBlock, TextDirection, YomiToku, YomiTokuError, YomiTokuOptions,
-    YomiTokuOptionsBuilder,
-};
 pub use util::{
     clamp, ensure_dir_writable, ensure_file_exists, format_duration, format_file_size, load_image,
     mm_to_pixels, mm_to_points, percentage, pixels_to_mm, points_to_mm,
 };
+pub use yomitoku::{
+    BatchOcrResult, OcrResult, TextBlock, TextDirection, YomiToku, YomiTokuError, YomiTokuOptions,
+    YomiTokuOptionsBuilder,
+};
 
-/// Exit codes for CLI
+/// Exit codes for CLI (deprecated: prefer using `ExitCode` enum)
+///
+/// These constants are provided for backward compatibility.
+/// The `ExitCode` enum provides a more type-safe alternative.
 pub mod exit_codes {
-    pub const SUCCESS: i32 = 0;
-    pub const GENERAL_ERROR: i32 = 1;
-    pub const INVALID_ARGS: i32 = 2;
-    pub const INPUT_NOT_FOUND: i32 = 3;
-    pub const OUTPUT_ERROR: i32 = 4;
-    pub const PROCESSING_ERROR: i32 = 5;
-    pub const GPU_ERROR: i32 = 6;
-    pub const EXTERNAL_TOOL_ERROR: i32 = 7;
+    use super::ExitCode;
+
+    pub const SUCCESS: i32 = ExitCode::Success as i32;
+    pub const GENERAL_ERROR: i32 = ExitCode::GeneralError as i32;
+    pub const INVALID_ARGS: i32 = ExitCode::InvalidArgs as i32;
+    pub const INPUT_NOT_FOUND: i32 = ExitCode::InputNotFound as i32;
+    pub const OUTPUT_ERROR: i32 = ExitCode::OutputError as i32;
+    pub const PROCESSING_ERROR: i32 = ExitCode::ProcessingError as i32;
+    pub const GPU_ERROR: i32 = ExitCode::GpuError as i32;
+    pub const EXTERNAL_TOOL_ERROR: i32 = ExitCode::ExternalToolError as i32;
 }

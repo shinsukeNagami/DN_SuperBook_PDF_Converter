@@ -360,7 +360,8 @@ impl PrintPdfWriter {
             // Convert points to mm (1 point = 0.3527777... mm)
             let x_mm = block.x as f32 * 0.352778;
             // PDF coordinate system has origin at bottom-left, so flip y
-            let y_mm = page_height_mm - (block.y as f32 * 0.352778) - (block.height as f32 * 0.352778);
+            let y_mm =
+                page_height_mm - (block.y as f32 * 0.352778) - (block.height as f32 * 0.352778);
             let font_size_pt = block.font_size as f32;
 
             // Set text rendering mode to invisible (mode 3)

@@ -34,13 +34,7 @@ fn bench_option_builders(c: &mut Criterion) {
     });
 
     group.bench_function("MarginOptions::builder", |b| {
-        b.iter(|| {
-            black_box(
-                MarginOptions::builder()
-                    .default_trim_percent(1.0)
-                    .build(),
-            )
-        })
+        b.iter(|| black_box(MarginOptions::builder().default_trim_percent(1.0).build()))
     });
 
     group.bench_function("PdfWriterOptions::builder", |b| {

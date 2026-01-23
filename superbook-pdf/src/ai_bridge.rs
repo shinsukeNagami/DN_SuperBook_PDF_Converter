@@ -454,15 +454,15 @@ impl SubprocessBridge {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
-        let child = cmd.spawn().map_err(|e| {
-            AiBridgeError::ProcessFailed(format!("Failed to spawn process: {}", e))
-        })?;
+        let child = cmd
+            .spawn()
+            .map_err(|e| AiBridgeError::ProcessFailed(format!("Failed to spawn process: {}", e)))?;
 
         // Wait for completion and check timeout
         let start = std::time::Instant::now();
-        let output = child.wait_with_output().map_err(|e| {
-            AiBridgeError::ProcessFailed(format!("Process error: {}", e))
-        })?;
+        let output = child
+            .wait_with_output()
+            .map_err(|e| AiBridgeError::ProcessFailed(format!("Process error: {}", e)))?;
 
         if start.elapsed() > timeout {
             return Err(AiBridgeError::Timeout(timeout));
@@ -475,8 +475,7 @@ impl SubprocessBridge {
             }
             return Err(AiBridgeError::ProcessFailed(format!(
                 "Process exited with status {}: {}",
-                output.status,
-                stderr
+                output.status, stderr
             )));
         }
 

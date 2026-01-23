@@ -302,14 +302,14 @@ impl YomiToku {
         args.push(options.language.code().to_string());
 
         // Execute YomiToku
-        let output = self.bridge.execute_with_timeout(
-            &args,
-            Duration::from_secs(options.timeout_secs),
-        )?;
+        let output = self
+            .bridge
+            .execute_with_timeout(&args, Duration::from_secs(options.timeout_secs))?;
 
         // Parse JSON output
-        let json_result: serde_json::Value = serde_json::from_str(&output)
-            .map_err(|e| YomiTokuError::ExecutionFailed(format!("Failed to parse output: {}", e)))?;
+        let json_result: serde_json::Value = serde_json::from_str(&output).map_err(|e| {
+            YomiTokuError::ExecutionFailed(format!("Failed to parse output: {}", e))
+        })?;
 
         // Extract text blocks
         let text_blocks = self.parse_text_blocks(&json_result)?;
@@ -398,7 +398,10 @@ impl YomiToku {
                 _ => TextDirection::Horizontal,
             };
 
-            let font_size = block.get("font_size").and_then(|f| f.as_f64()).map(|f| f as f32);
+            let font_size = block
+                .get("font_size")
+                .and_then(|f| f.as_f64())
+                .map(|f| f as f32);
 
             text_blocks.push(TextBlock {
                 text,
@@ -479,9 +482,7 @@ mod tests {
 
     #[test]
     fn test_confidence_clamping() {
-        let opts = YomiTokuOptions::builder()
-            .confidence_threshold(1.5)
-            .build();
+        let opts = YomiTokuOptions::builder().confidence_threshold(1.5).build();
         assert_eq!(opts.confidence_threshold, 1.0);
 
         let opts = YomiTokuOptions::builder()
@@ -555,7 +556,10 @@ mod tests {
 
     #[test]
     fn test_text_direction_variants() {
-        assert!(matches!(TextDirection::Horizontal, TextDirection::Horizontal));
+        assert!(matches!(
+            TextDirection::Horizontal,
+            TextDirection::Horizontal
+        ));
         assert!(matches!(TextDirection::Vertical, TextDirection::Vertical));
         assert!(matches!(TextDirection::Mixed, TextDirection::Mixed));
     }

@@ -6,6 +6,64 @@ use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 
+/// Exit codes for the CLI
+///
+/// These codes follow standard Unix conventions and provide
+/// specific error categories for scripting and automation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum ExitCode {
+    /// 正常終了
+    Success = 0,
+    /// 一般的なエラー
+    GeneralError = 1,
+    /// 引数エラー
+    InvalidArgs = 2,
+    /// 入力ファイル/ディレクトリが見つからない
+    InputNotFound = 3,
+    /// 出力エラー（書き込み権限など）
+    OutputError = 4,
+    /// 処理中のエラー
+    ProcessingError = 5,
+    /// GPU初期化/処理エラー
+    GpuError = 6,
+    /// 外部ツール（Python等）エラー
+    ExternalToolError = 7,
+}
+
+impl ExitCode {
+    /// Convert to process exit code
+    pub fn code(self) -> i32 {
+        self as i32
+    }
+
+    /// Get human-readable description
+    pub fn description(self) -> &'static str {
+        match self {
+            ExitCode::Success => "Success",
+            ExitCode::GeneralError => "General error",
+            ExitCode::InvalidArgs => "Invalid arguments",
+            ExitCode::InputNotFound => "Input file or directory not found",
+            ExitCode::OutputError => "Output error (permission denied, disk full, etc.)",
+            ExitCode::ProcessingError => "Processing error",
+            ExitCode::GpuError => "GPU initialization or processing error",
+            ExitCode::ExternalToolError => "External tool error (Python, ImageMagick, etc.)",
+        }
+    }
+}
+
+impl From<ExitCode> for i32 {
+    fn from(code: ExitCode) -> Self {
+        code.code()
+    }
+}
+
+impl From<ExitCode> for std::process::ExitCode {
+    fn from(code: ExitCode) -> Self {
+        std::process::ExitCode::from(code.code() as u8)
+    }
+}
+
 /// High-quality PDF converter for scanned books
 #[derive(Parser, Debug)]
 #[command(name = "superbook-pdf")]
@@ -282,5 +340,54 @@ mod tests {
             pb.set_message(format!("page_{}.png", i));
         }
         pb.finish_with_message("All pages processed");
+    }
+
+    // Exit code tests
+    #[test]
+    fn test_exit_code_values() {
+        assert_eq!(ExitCode::Success.code(), 0);
+        assert_eq!(ExitCode::GeneralError.code(), 1);
+        assert_eq!(ExitCode::InvalidArgs.code(), 2);
+        assert_eq!(ExitCode::InputNotFound.code(), 3);
+        assert_eq!(ExitCode::OutputError.code(), 4);
+        assert_eq!(ExitCode::ProcessingError.code(), 5);
+        assert_eq!(ExitCode::GpuError.code(), 6);
+        assert_eq!(ExitCode::ExternalToolError.code(), 7);
+    }
+
+    #[test]
+    fn test_exit_code_descriptions() {
+        assert_eq!(ExitCode::Success.description(), "Success");
+        assert!(!ExitCode::GeneralError.description().is_empty());
+        assert!(!ExitCode::InvalidArgs.description().is_empty());
+        assert!(!ExitCode::InputNotFound.description().is_empty());
+        assert!(!ExitCode::OutputError.description().is_empty());
+        assert!(!ExitCode::ProcessingError.description().is_empty());
+        assert!(!ExitCode::GpuError.description().is_empty());
+        assert!(!ExitCode::ExternalToolError.description().is_empty());
+    }
+
+    #[test]
+    fn test_exit_code_into_i32() {
+        let code: i32 = ExitCode::Success.into();
+        assert_eq!(code, 0);
+
+        let code: i32 = ExitCode::ExternalToolError.into();
+        assert_eq!(code, 7);
+    }
+
+    #[test]
+    fn test_exit_code_equality() {
+        assert_eq!(ExitCode::Success, ExitCode::Success);
+        assert_ne!(ExitCode::Success, ExitCode::GeneralError);
+    }
+
+    #[test]
+    fn test_exit_code_clone_copy() {
+        let code = ExitCode::ProcessingError;
+        let cloned = code.clone();
+        let copied = code;
+        assert_eq!(code, cloned);
+        assert_eq!(code, copied);
     }
 }

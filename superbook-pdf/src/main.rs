@@ -5,13 +5,13 @@
 use clap::Parser;
 use std::path::PathBuf;
 use std::time::Instant;
+use superbook_pdf::pdf_writer::{OcrLayer, OcrPageText, TextBlock};
 use superbook_pdf::{
     exit_codes, AiBridgeConfig, Cli, Commands, ConvertArgs, DeskewOptions, ExtractOptions,
     ImageMarginDetector, ImageProcDeskewer, LopdfReader, MagickExtractor, MarginOptions,
-    PdfWriterOptions, PrintPdfWriter, RealEsrgan, RealEsrganOptions, SubprocessBridge,
-    YomiToku, YomiTokuOptions,
+    PdfWriterOptions, PrintPdfWriter, RealEsrgan, RealEsrganOptions, SubprocessBridge, YomiToku,
+    YomiTokuOptions,
 };
-use superbook_pdf::pdf_writer::{OcrLayer, OcrPageText, TextBlock};
 
 fn main() {
     let cli = Cli::parse();
@@ -398,7 +398,11 @@ fn process_single_pdf(
 
                 if verbose {
                     let success_count = results.iter().filter(|r| r.is_some()).count();
-                    println!("    OCR completed: {}/{} pages", success_count, results.len());
+                    println!(
+                        "    OCR completed: {}/{} pages",
+                        success_count,
+                        results.len()
+                    );
                 }
                 results
             }
