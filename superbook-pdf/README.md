@@ -4,7 +4,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1035_passed-green.svg)]()
+[![Tests](https://img.shields.io/badge/tests-1064_passed-green.svg)]()
 
 ## ステータス
 
@@ -12,8 +12,8 @@
 
 | 項目 | 状態 |
 |------|------|
-| コード行数 | 43,158行 |
-| テスト | 1,035件 全てパス |
+| コード行数 | 44,800行 |
+| テスト | 1,064件 全てパス |
 | Clippy警告 | 0件 |
 | メモリ使用量 | 0.4-0.8 GB (C#版の1/30) |
 
@@ -27,6 +27,7 @@
 - **AI超解像**: RealESRGAN 2x/4xアップスケーリング
 - **日本語OCR**: YomiToku AI-OCRによる検索可能PDF生成
 - **ページ番号認識**: ローマ数字対応、オフセット自動補正
+- **縦書き検出**: 日本語書籍の縦書き/横書き自動判定
 - **メモリ効率**: ストリーミング処理で0.4-0.8GB RAM使用
 
 ## クイックスタート
@@ -194,10 +195,10 @@ cargo fmt -- --check
 - [x] PDF画像埋め込み
 - [x] Poppler fallback (ImageMagickなしでも動作)
 
-### 計画中 (v0.2.0)
+### 進行中 (v0.2.0)
 
-- [ ] 縦書き検出（日本語書籍向け）
-- [ ] JPEG圧縮オプション（ファイルサイズ削減）
+- [x] 縦書き検出（日本語書籍向け） - `vertical_detect` モジュール
+- [x] JPEG圧縮オプション（ファイルサイズ削減） - `--jpeg-quality` CLI引数
 - [ ] 並列処理の最適化
 - [ ] Webインターフェース
 
