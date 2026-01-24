@@ -363,6 +363,11 @@ impl SubprocessBridge {
         Ok(Self { config })
     }
 
+    /// Get the configuration
+    pub fn config(&self) -> &AiBridgeConfig {
+        &self.config
+    }
+
     /// Get Python executable path
     fn get_python_path(&self) -> PathBuf {
         if cfg!(windows) {

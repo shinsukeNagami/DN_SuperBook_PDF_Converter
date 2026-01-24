@@ -108,32 +108,69 @@ def process_image(
         analyzer = DocumentAnalyzer(device=device)
 
         # Load and process image
-        img = load_image(str(input_path))
-        result = analyzer(img)
+        # load_image returns a list of numpy arrays (for batch processing)
+        img_list = load_image(str(input_path))
+        if isinstance(img_list, list) and len(img_list) > 0:
+            img = img_list[0]
+        else:
+            img = img_list
+        result_tuple = analyzer(img)
+        # YomiToku 0.10+ returns a tuple (DocumentAnalyzerSchema, None, None)
+        result = result_tuple[0] if isinstance(result_tuple, tuple) else result_tuple
 
-        # Extract text blocks
+        # Extract text blocks from paragraphs
         text_blocks = []
         full_text = []
 
-        for line in result.lines:
-            block = {
-                "text": line.text,
-                "bbox": [line.box.x1, line.box.y1, line.box.x2, line.box.y2],
-                "confidence": float(line.confidence) if hasattr(line, "confidence") else 1.0,
-                "direction": "vertical" if getattr(line, "vertical", False) else "horizontal",
-            }
+        # Process paragraphs (main text blocks)
+        for para in getattr(result, "paragraphs", []):
+            # Parse box - can be [x1, y1, x2, y2] or a Box object
+            box = para.box if hasattr(para, "box") else getattr(para, "bbox", [0, 0, 0, 0])
+            if hasattr(box, "__iter__") and not isinstance(box, str):
+                box_list = list(box)
+            else:
+                box_list = [0, 0, 0, 0]
 
-            if block["confidence"] >= confidence_threshold:
+            # Get text content
+            text = para.contents if hasattr(para, "contents") else str(para)
+            
+            # Get direction
+            direction = getattr(para, "direction", "horizontal")
+            
+            block = {
+                "text": text,
+                "bbox": box_list,
+                "confidence": 1.0,  # YomiToku doesn't provide per-block confidence
+                "direction": direction,
+            }
+            text_blocks.append(block)
+            full_text.append(text)
+
+        # Also process individual words if no paragraphs found
+        if not text_blocks:
+            for word in getattr(result, "words", []):
+                box = word.box if hasattr(word, "box") else getattr(word, "bbox", [0, 0, 0, 0])
+                if hasattr(box, "__iter__") and not isinstance(box, str):
+                    box_list = list(box)
+                else:
+                    box_list = [0, 0, 0, 0]
+                    
+                text = word.content if hasattr(word, "content") else str(word)
+                direction = getattr(word, "direction", "horizontal")
+                
+                block = {
+                    "text": text,
+                    "bbox": box_list,
+                    "confidence": 1.0,
+                    "direction": direction,
+                }
                 text_blocks.append(block)
-                full_text.append(line.text)
+                full_text.append(text)
 
         elapsed = time.time() - start_time
 
-        # Calculate overall confidence
-        if text_blocks:
-            avg_confidence = sum(b["confidence"] for b in text_blocks) / len(text_blocks)
-        else:
-            avg_confidence = 0.0
+        # Calculate overall confidence (set to 1.0 since YomiToku doesn't provide it)
+        avg_confidence = 1.0 if text_blocks else 0.0
 
         return {
             "input_path": str(input_path),

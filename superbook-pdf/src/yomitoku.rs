@@ -322,49 +322,68 @@ impl YomiToku {
             return Err(YomiTokuError::InputNotFound(input_path.to_path_buf()));
         }
 
-        // Build command arguments
+        // Get bridge script path
+        let bridge_dir = self.bridge.config().venv_path.parent().unwrap_or(Path::new("."));
+        let bridge_script = bridge_dir.join("yomitoku_bridge.py");
+
+        if !bridge_script.exists() {
+            return Err(YomiTokuError::ExecutionFailed(format!(
+                "Bridge script not found: {}",
+                bridge_script.display()
+            )));
+        }
+
+        // Build command arguments for bridge script
         let mut args = vec![
-            "-m".to_string(),
-            "yomitoku".to_string(),
+            bridge_script.to_string_lossy().to_string(),
             input_path.to_string_lossy().to_string(),
-            "--output-format".to_string(),
+            "--format".to_string(),
             "json".to_string(),
         ];
 
         if options.use_gpu {
             args.push("--gpu".to_string());
             if let Some(gpu_id) = options.gpu_id {
-                args.push("--gpu-id".to_string());
                 args.push(gpu_id.to_string());
+            } else {
+                args.push("0".to_string());
             }
         } else {
-            args.push("--cpu".to_string());
-        }
-
-        if options.detect_vertical {
-            args.push("--detect-vertical".to_string());
+            args.push("--no-gpu".to_string());
         }
 
         args.push("--confidence".to_string());
         args.push(options.confidence_threshold.to_string());
 
-        args.push("--lang".to_string());
-        args.push(options.language.code().to_string());
-
-        // Execute YomiToku
+        // Execute YomiToku via bridge
         let output = self
             .bridge
             .execute_with_timeout(&args, Duration::from_secs(options.timeout_secs))?;
 
-        // Parse JSON output
+        // Parse JSON output from bridge
         let json_result: serde_json::Value = serde_json::from_str(&output).map_err(|e| {
-            YomiTokuError::ExecutionFailed(format!("Failed to parse output: {}", e))
+            YomiTokuError::ExecutionFailed(format!("Failed to parse output: {} (raw: {})", e, output))
         })?;
 
-        // Extract text blocks
-        let text_blocks = self.parse_text_blocks(&json_result)?;
-        let overall_confidence = self.calculate_overall_confidence(&text_blocks);
-        let text_direction = self.detect_dominant_direction(&text_blocks);
+        // Check for error in response
+        if let Some(error) = json_result.get("error") {
+            return Err(YomiTokuError::ExecutionFailed(
+                error.as_str().unwrap_or("Unknown error").to_string(),
+            ));
+        }
+
+        // Extract text blocks from bridge output format
+        let text_blocks = self.parse_bridge_output(&json_result)?;
+        let overall_confidence = json_result
+            .get("confidence")
+            .and_then(|c| c.as_f64())
+            .unwrap_or(0.0) as f32;
+        let text_direction = match json_result.get("text_direction").and_then(|d| d.as_str()) {
+            Some("vertical") => TextDirection::Vertical,
+            Some("horizontal") => TextDirection::Horizontal,
+            Some("mixed") => TextDirection::Mixed,
+            _ => self.detect_dominant_direction(&text_blocks),
+        };
 
         Ok(OcrResult {
             input_path: input_path.to_path_buf(),
@@ -459,6 +478,63 @@ impl YomiToku {
                 confidence,
                 direction,
                 font_size,
+            });
+        }
+
+        Ok(text_blocks)
+    }
+
+    /// Parse text blocks from bridge script JSON output
+    fn parse_bridge_output(&self, json: &serde_json::Value) -> Result<Vec<TextBlock>> {
+        // Bridge script returns: { "text_blocks": [...], "full_text": "...", ... }
+        let blocks = json
+            .get("text_blocks")
+            .and_then(|b| b.as_array())
+            .ok_or(YomiTokuError::InvalidOutput)?;
+
+        let mut text_blocks = Vec::new();
+
+        for block in blocks {
+            let text = block
+                .get("text")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            // Bridge format: bbox is [x1, y1, x2, y2]
+            let bbox_arr = block
+                .get("bbox")
+                .and_then(|b| b.as_array())
+                .map(|arr| {
+                    let vals: Vec<u32> = arr
+                        .iter()
+                        .filter_map(|v| v.as_f64().map(|f| f as u32))
+                        .collect();
+                    if vals.len() >= 4 {
+                        (vals[0], vals[1], vals[2] - vals[0], vals[3] - vals[1]) // Convert to x, y, w, h
+                    } else {
+                        (0, 0, 0, 0)
+                    }
+                })
+                .unwrap_or((0, 0, 0, 0));
+
+            let confidence = block
+                .get("confidence")
+                .and_then(|c| c.as_f64())
+                .unwrap_or(0.0) as f32;
+
+            let direction = match block.get("direction").and_then(|d| d.as_str()) {
+                Some("vertical") => TextDirection::Vertical,
+                Some("horizontal") => TextDirection::Horizontal,
+                _ => TextDirection::Horizontal,
+            };
+
+            text_blocks.push(TextBlock {
+                text,
+                bbox: bbox_arr,
+                confidence,
+                direction,
+                font_size: None,
             });
         }
 
