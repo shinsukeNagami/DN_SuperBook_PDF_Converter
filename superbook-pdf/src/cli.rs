@@ -187,6 +187,10 @@ pub struct ConvertArgs {
     #[arg(long)]
     pub skip_existing: bool,
 
+    /// Force re-processing even if cache is valid
+    #[arg(long, short = 'f')]
+    pub force: bool,
+
     // === Debug options ===
     /// Maximum pages to process (for debugging)
     #[arg(long)]
@@ -1818,6 +1822,50 @@ mod tests {
         if let Commands::Convert(args) = cli.command {
             assert_eq!(args.max_pages, Some(5));
             assert!(args.save_debug);
+        }
+    }
+
+    // ============ Force Option Tests ============
+
+    #[test]
+    fn test_force_default() {
+        let cli = Cli::try_parse_from(["superbook-pdf", "convert", "input.pdf"]).unwrap();
+        if let Commands::Convert(args) = cli.command {
+            assert!(!args.force);
+        }
+    }
+
+    #[test]
+    fn test_force_long() {
+        let cli =
+            Cli::try_parse_from(["superbook-pdf", "convert", "input.pdf", "--force"]).unwrap();
+        if let Commands::Convert(args) = cli.command {
+            assert!(args.force);
+        }
+    }
+
+    #[test]
+    fn test_force_short() {
+        let cli = Cli::try_parse_from(["superbook-pdf", "convert", "input.pdf", "-f"]).unwrap();
+        if let Commands::Convert(args) = cli.command {
+            assert!(args.force);
+        }
+    }
+
+    #[test]
+    fn test_force_with_skip_existing() {
+        // Both flags can be used together (--force takes precedence)
+        let cli = Cli::try_parse_from([
+            "superbook-pdf",
+            "convert",
+            "input.pdf",
+            "--skip-existing",
+            "--force",
+        ])
+        .unwrap();
+        if let Commands::Convert(args) = cli.command {
+            assert!(args.skip_existing);
+            assert!(args.force);
         }
     }
 }

@@ -4,7 +4,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1127_passed-green.svg)]()
+[![Tests](https://img.shields.io/badge/tests-1154_passed-green.svg)]()
 
 ## ステータス
 
@@ -12,8 +12,8 @@
 
 | 項目 | 状態 |
 |------|------|
-| コード行数 | 27,000行 |
-| テスト | 1,127件 全てパス |
+| コード行数 | 28,000行 |
+| テスト | 1,154件 全てパス |
 | Clippy警告 | 0件 |
 | メモリ使用量 | 0.4-0.8 GB (C#版の1/30) |
 
@@ -28,6 +28,7 @@
 - **日本語OCR**: YomiToku AI-OCRによる検索可能PDF生成
 - **ページ番号認識**: ローマ数字対応、オフセット自動補正
 - **縦書き検出**: 日本語書籍の縦書き/横書き自動判定
+- **スマートキャッシュ**: ハッシュベースの処理結果キャッシュで再処理スキップ
 - **メモリ効率**: ストリーミング処理で0.4-0.8GB RAM使用
 
 ## クイックスタート

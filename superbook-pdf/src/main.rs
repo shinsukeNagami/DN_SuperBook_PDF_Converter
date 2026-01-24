@@ -12,6 +12,11 @@ use superbook_pdf::pdf_writer::{OcrLayer, OcrPageText, TextBlock};
 use superbook_pdf::{
     exit_codes,
     AiBridgeConfig,
+    // Cache module
+    CacheDigest,
+    ProcessingCache,
+    ProcessingResult,
+    should_skip_processing,
     Cli,
     // Phase 1-6: Advanced processing modules
     ColorAnalyzer,
@@ -93,17 +98,37 @@ fn run_convert(args: &ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut skip_count = 0usize;
     let mut error_count = 0usize;
 
+    // Pre-compute options JSON for caching
+    let options_json = get_options_json(args);
+
     // Process each PDF file
     for (idx, pdf_path) in pdf_files.iter().enumerate() {
-        // Check if output already exists (--skip-existing)
-        if args.skip_existing {
-            let output_pdf = get_output_pdf_path(pdf_path, &args.output);
+        let output_pdf = get_output_pdf_path(pdf_path, &args.output);
+
+        // Check cache for smart skipping (--skip-existing or cache-based)
+        if args.skip_existing && !args.force {
+            // Simple existence check (backward compatible)
             if output_pdf.exists() {
                 if verbose {
                     println!(
                         "[{}/{}] Skipping (exists): {}",
                         idx + 1,
                         pdf_files.len(),
+                        pdf_path.display()
+                    );
+                }
+                skip_count += 1;
+                continue;
+            }
+        } else if !args.force {
+            // Smart cache-based skipping
+            if let Some(cache) = should_skip_processing(pdf_path, &output_pdf, &options_json, false) {
+                if verbose {
+                    println!(
+                        "[{}/{}] Skipping (cached, {} pages): {}",
+                        idx + 1,
+                        pdf_files.len(),
+                        cache.result.page_count,
                         pdf_path.display()
                     );
                 }
@@ -121,8 +146,27 @@ fn run_convert(args: &ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
             );
         }
 
+        let file_start = Instant::now();
+
         match process_single_pdf(pdf_path, args) {
-            Ok(()) => ok_count += 1,
+            Ok(()) => {
+                ok_count += 1;
+                // Save cache after successful processing
+                if let Ok(digest) = CacheDigest::new(pdf_path, &options_json) {
+                    let output_size = std::fs::metadata(&output_pdf)
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    let result = ProcessingResult::new(
+                        0, // page_count will be updated later
+                        None, // page_number_shift
+                        false, // is_vertical
+                        file_start.elapsed().as_secs_f64(),
+                        output_size,
+                    );
+                    let cache = ProcessingCache::new(digest, result);
+                    let _ = cache.save(&output_pdf); // Ignore save errors
+                }
+            }
             Err(e) => {
                 eprintln!("Error processing {}: {}", pdf_path.display(), e);
                 error_count += 1;
@@ -148,9 +192,28 @@ fn run_convert(args: &ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Get the output PDF path for a given input PDF
-fn get_output_pdf_path(pdf_path: &PathBuf, output_dir: &PathBuf) -> PathBuf {
+fn get_output_pdf_path(pdf_path: &std::path::Path, output_dir: &std::path::Path) -> PathBuf {
     let pdf_name = pdf_path.file_stem().unwrap_or_default().to_string_lossy();
     output_dir.join(format!("{}_converted.pdf", pdf_name))
+}
+
+/// Generate options JSON for cache digest
+fn get_options_json(args: &ConvertArgs) -> String {
+    // Include all options that affect output
+    format!(
+        r#"{{"dpi":{},"deskew":{},"margin_trim":{},"upscale":{},"gpu":{},"internal_resolution":{},"color_correction":{},"offset_alignment":{},"output_height":{},"ocr":{},"max_pages":{}}}"#,
+        args.dpi,
+        args.effective_deskew(),
+        args.margin_trim,
+        args.effective_upscale(),
+        args.effective_gpu(),
+        args.internal_resolution || args.advanced,
+        args.color_correction || args.advanced,
+        args.offset_alignment || args.advanced,
+        args.output_height,
+        args.ocr,
+        args.max_pages.map_or("null".to_string(), |n| n.to_string())
+    )
 }
 
 /// Collect PDF files from input path (file or directory)
@@ -226,6 +289,10 @@ fn print_execution_plan(args: &ConvertArgs, pdf_files: &[PathBuf]) {
     println!(
         "  Skip existing: {}",
         if args.skip_existing { "YES" } else { "NO" }
+    );
+    println!(
+        "  Force re-process: {}",
+        if args.force { "YES" } else { "NO" }
     );
     println!("  Verbose: {}", args.verbose);
     println!();

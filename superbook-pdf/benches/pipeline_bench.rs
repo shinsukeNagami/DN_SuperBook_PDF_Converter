@@ -470,6 +470,39 @@ fn bench_progress_structures(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark cache module structures
+fn bench_cache_structures(c: &mut Criterion) {
+    use superbook_pdf::{CacheDigest, ProcessingCache, ProcessingResult};
+
+    let mut group = c.benchmark_group("cache_structures");
+
+    group.bench_function("CacheDigest::with_values", |b| {
+        b.iter(|| {
+            black_box(CacheDigest::with_values(
+                1706123456,
+                12345678,
+                "sha256:abc123def456",
+            ))
+        })
+    });
+
+    group.bench_function("ProcessingResult::default", |b| {
+        b.iter(|| black_box(ProcessingResult::default()))
+    });
+
+    group.bench_function("ProcessingResult::new", |b| {
+        b.iter(|| black_box(ProcessingResult::new(100, Some(2), true, 45.5, 54321098)))
+    });
+
+    group.bench_function("ProcessingCache::new", |b| {
+        let digest = CacheDigest::with_values(1706123456, 12345678, "sha256:abc123");
+        let result = ProcessingResult::default();
+        b.iter(|| black_box(ProcessingCache::new(digest.clone(), result.clone())))
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_option_builders,
@@ -489,6 +522,8 @@ criterion_group!(
     bench_finalize_structures,
     // Progress tracking benchmarks
     bench_progress_structures,
+    // Cache module benchmarks
+    bench_cache_structures,
 );
 
 criterion_main!(benches);

@@ -118,6 +118,7 @@
 //! AGPL-3.0
 
 pub mod ai_bridge;
+pub mod cache;
 pub mod cli;
 pub mod color_stats;
 pub mod deskew;
@@ -191,6 +192,10 @@ pub use parallel::{
     ParallelResult,
 };
 pub use progress::{build_progress_bar, OutputMode, ProcessingStage, ProgressTracker};
+pub use cache::{
+    should_skip_processing, CacheDigest, ProcessingCache, ProcessingResult, CACHE_EXTENSION,
+    CACHE_VERSION,
+};
 
 /// Exit codes for CLI (deprecated: prefer using `ExitCode` enum)
 ///
