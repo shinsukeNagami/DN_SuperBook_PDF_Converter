@@ -465,10 +465,20 @@ fn process_single_pdf(
             }
             std::fs::create_dir_all(&color_corrected_dir)?;
 
-            // Collect color statistics from all pages
+            // Collect color statistics from all pages (parallel)
+            let stats_results: Vec<_> = images_after_normalize
+                .par_iter()
+                .enumerate()
+                .map(|(i, img_path)| {
+                    let result = ColorAnalyzer::calculate_stats(img_path);
+                    (i, result)
+                })
+                .collect();
+
+            // Aggregate stats (sequential - needs all results)
             let mut all_stats = Vec::new();
-            for (i, img_path) in images_after_normalize.iter().enumerate() {
-                match ColorAnalyzer::calculate_stats(img_path) {
+            for (i, result) in stats_results {
+                match result {
                     Ok(stats) => {
                         if verbose && args.verbose > 1 {
                             println!(
@@ -503,40 +513,45 @@ fn process_single_pdf(
                 );
                 }
 
-                // Apply color correction to all images
-                let mut corrected_images = Vec::new();
-                for (i, img_path) in images_after_normalize.iter().enumerate() {
-                    let output_path = color_corrected_dir.join(format!("page_{:04}.png", i));
-                    // Load image, apply adjustment, save
-                    match image::open(img_path) {
-                        Ok(img) => {
-                            let mut rgb_img = img.to_rgb8();
-                            ColorAnalyzer::apply_adjustment(&mut rgb_img, &global_param);
-                            if let Err(e) = rgb_img.save(&output_path) {
-                                if verbose {
-                                    println!(
-                                        "    Page {}: save failed ({}), keeping original",
+                // Apply color correction to all images (parallel)
+                let output_paths: Vec<PathBuf> = (0..images_after_normalize.len())
+                    .map(|i| color_corrected_dir.join(format!("page_{:04}.png", i)))
+                    .collect();
+
+                let corrected_images: Vec<PathBuf> = images_after_normalize
+                    .par_iter()
+                    .zip(output_paths.par_iter())
+                    .enumerate()
+                    .map(|(i, (img_path, output_path))| {
+                        match image::open(img_path) {
+                            Ok(img) => {
+                                let mut rgb_img = img.to_rgb8();
+                                ColorAnalyzer::apply_adjustment(&mut rgb_img, &global_param);
+                                if let Err(e) = rgb_img.save(output_path) {
+                                    if verbose && args.verbose > 1 {
+                                        eprintln!(
+                                            "\n    Page {}: save failed ({}), keeping original",
+                                            i + 1,
+                                            e
+                                        );
+                                    }
+                                    std::fs::copy(img_path, output_path).ok();
+                                }
+                            }
+                            Err(e) => {
+                                if verbose && args.verbose > 1 {
+                                    eprintln!(
+                                        "\n    Page {}: color correction failed ({}), keeping original",
                                         i + 1,
                                         e
                                     );
                                 }
-                                std::fs::copy(img_path, &output_path)?;
+                                std::fs::copy(img_path, output_path).ok();
                             }
-                            corrected_images.push(output_path);
                         }
-                        Err(e) => {
-                            if verbose {
-                                println!(
-                                    "    Page {}: color correction failed ({}), keeping original",
-                                    i + 1,
-                                    e
-                                );
-                            }
-                            std::fs::copy(img_path, &output_path)?;
-                            corrected_images.push(output_path);
-                        }
-                    }
-                }
+                        output_path.clone()
+                    })
+                    .collect();
 
                 if verbose {
                     println!("    Color corrected {} images", corrected_images.len());
@@ -589,50 +604,56 @@ fn process_single_pdf(
                 );
             }
 
-            // Apply crop to all images
-            let mut cropped_images = Vec::new();
-            for (i, img_path) in images_after_color.iter().enumerate() {
-                let output_path = cropped_dir.join(format!("page_{:04}.png", i));
-                let region = if i % 2 == 0 {
-                    &unified.odd_region
-                } else {
-                    &unified.even_region
-                };
+            // Apply crop to all images (parallel)
+            let output_paths: Vec<PathBuf> = (0..images_after_color.len())
+                .map(|i| cropped_dir.join(format!("page_{:04}.png", i)))
+                .collect();
 
-                // Use the crop region to trim the image
-                match image::open(img_path) {
-                    Ok(img) => {
-                        let cropped = img.crop_imm(
-                            region.left,
-                            region.top,
-                            region.width.min(img.width() - region.left),
-                            region.height.min(img.height() - region.top),
-                        );
-                        if let Err(e) = cropped.save(&output_path) {
-                            if verbose {
-                                println!(
-                                    "    Page {}: crop failed ({}), keeping original",
+            let cropped_images: Vec<PathBuf> = images_after_color
+                .par_iter()
+                .zip(output_paths.par_iter())
+                .enumerate()
+                .map(|(i, (img_path, output_path))| {
+                    let region = if i % 2 == 0 {
+                        &unified.odd_region
+                    } else {
+                        &unified.even_region
+                    };
+
+                    // Use the crop region to trim the image
+                    match image::open(img_path) {
+                        Ok(img) => {
+                            let cropped = img.crop_imm(
+                                region.left,
+                                region.top,
+                                region.width.min(img.width() - region.left),
+                                region.height.min(img.height() - region.top),
+                            );
+                            if let Err(e) = cropped.save(output_path) {
+                                if verbose && args.verbose > 1 {
+                                    eprintln!(
+                                        "\n    Page {}: crop failed ({}), keeping original",
+                                        i + 1,
+                                        e
+                                    );
+                                }
+                                std::fs::copy(img_path, output_path).ok();
+                            }
+                        }
+                        Err(e) => {
+                            if verbose && args.verbose > 1 {
+                                eprintln!(
+                                    "\n    Page {}: image load failed ({}), keeping original",
                                     i + 1,
                                     e
                                 );
                             }
-                            std::fs::copy(img_path, &output_path)?;
+                            std::fs::copy(img_path, output_path).ok();
                         }
-                        cropped_images.push(output_path);
                     }
-                    Err(e) => {
-                        if verbose {
-                            println!(
-                                "    Page {}: image load failed ({}), keeping original",
-                                i + 1,
-                                e
-                            );
-                        }
-                        std::fs::copy(img_path, &output_path)?;
-                        cropped_images.push(output_path);
-                    }
-                }
-            }
+                    output_path.clone()
+                })
+                .collect();
 
             if verbose {
                 println!("    Cropped {} images", cropped_images.len());
@@ -701,7 +722,7 @@ fn process_single_pdf(
         None
     };
 
-    // Step 10: Final Output (resize with gradient padding)
+    // Step 10: Final Output (resize with gradient padding) - parallel
     let finalized_dir = work_dir.join("finalized");
     let final_images: Vec<PathBuf> = if args.output_height != 0 && args.output_height != 7016 {
         if verbose {
@@ -713,27 +734,35 @@ fn process_single_pdf(
             .target_height(args.output_height)
             .build();
 
-        let mut finalized_images = Vec::new();
-        for (i, img_path) in images_after_crop.iter().enumerate() {
-            let output_path = finalized_dir.join(format!("page_{:04}.png", i));
-            // finalize takes 6 args: input, output, options, crop_region, shift_x, shift_y
-            match PageFinalizer::finalize(img_path, &output_path, &finalize_options, None, 0, 0) {
-                Ok(_) => {
-                    finalized_images.push(output_path);
-                }
-                Err(e) => {
-                    if verbose {
-                        println!(
-                            "    Page {}: finalize failed ({}), keeping original",
-                            i + 1,
-                            e
-                        );
+        // Prepare output paths
+        let output_paths: Vec<PathBuf> = (0..images_after_crop.len())
+            .map(|i| finalized_dir.join(format!("page_{:04}.png", i)))
+            .collect();
+
+        // Finalize all images in parallel
+        let finalized_images: Vec<PathBuf> = images_after_crop
+            .par_iter()
+            .zip(output_paths.par_iter())
+            .enumerate()
+            .map(|(i, (img_path, output_path))| {
+                // finalize takes 6 args: input, output, options, crop_region, shift_x, shift_y
+                match PageFinalizer::finalize(img_path, output_path, &finalize_options, None, 0, 0)
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        if verbose && args.verbose > 1 {
+                            eprintln!(
+                                "\n    Page {}: finalize failed ({}), keeping original",
+                                i + 1,
+                                e
+                            );
+                        }
+                        std::fs::copy(img_path, output_path).ok();
                     }
-                    std::fs::copy(img_path, &output_path)?;
-                    finalized_images.push(output_path);
                 }
-            }
-        }
+                output_path.clone()
+            })
+            .collect();
 
         if verbose {
             println!("    Finalized {} images", finalized_images.len());
