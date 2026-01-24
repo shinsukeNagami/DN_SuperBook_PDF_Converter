@@ -128,6 +128,10 @@ pub struct ConvertArgs {
     #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u32).range(1..=4800))]
     pub dpi: u32,
 
+    /// JPEG quality for PDF image compression (1-100, higher = better quality, larger file)
+    #[arg(long, default_value_t = 90, value_parser = clap::value_parser!(u8).range(1..=100))]
+    pub jpeg_quality: u8,
+
     /// Number of parallel threads
     #[arg(short, long)]
     pub threads: Option<usize>,
@@ -1353,6 +1357,85 @@ mod tests {
         if let Commands::Convert(args) = cli.command {
             assert_eq!(args.dpi, 2400);
         }
+    }
+
+    // ============ JPEG Quality Tests ============
+
+    #[test]
+    fn test_jpeg_quality_default() {
+        let cli = Cli::try_parse_from(["superbook-pdf", "convert", "input.pdf"]).unwrap();
+        if let Commands::Convert(args) = cli.command {
+            assert_eq!(args.jpeg_quality, 90);
+        }
+    }
+
+    #[test]
+    fn test_jpeg_quality_custom() {
+        let cli = Cli::try_parse_from([
+            "superbook-pdf",
+            "convert",
+            "input.pdf",
+            "--jpeg-quality",
+            "75",
+        ])
+        .unwrap();
+        if let Commands::Convert(args) = cli.command {
+            assert_eq!(args.jpeg_quality, 75);
+        }
+    }
+
+    #[test]
+    fn test_jpeg_quality_boundary_minimum() {
+        let cli = Cli::try_parse_from([
+            "superbook-pdf",
+            "convert",
+            "input.pdf",
+            "--jpeg-quality",
+            "1",
+        ])
+        .unwrap();
+        if let Commands::Convert(args) = cli.command {
+            assert_eq!(args.jpeg_quality, 1);
+        }
+    }
+
+    #[test]
+    fn test_jpeg_quality_boundary_maximum() {
+        let cli = Cli::try_parse_from([
+            "superbook-pdf",
+            "convert",
+            "input.pdf",
+            "--jpeg-quality",
+            "100",
+        ])
+        .unwrap();
+        if let Commands::Convert(args) = cli.command {
+            assert_eq!(args.jpeg_quality, 100);
+        }
+    }
+
+    #[test]
+    fn test_jpeg_quality_invalid_zero() {
+        let result = Cli::try_parse_from([
+            "superbook-pdf",
+            "convert",
+            "input.pdf",
+            "--jpeg-quality",
+            "0",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_jpeg_quality_invalid_over_100() {
+        let result = Cli::try_parse_from([
+            "superbook-pdf",
+            "convert",
+            "input.pdf",
+            "--jpeg-quality",
+            "101",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]

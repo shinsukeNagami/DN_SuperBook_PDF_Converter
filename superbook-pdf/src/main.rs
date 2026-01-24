@@ -826,6 +826,7 @@ fn process_single_pdf(
 
     let mut pdf_builder = PdfWriterOptions::builder()
         .dpi(args.dpi)
+        .jpeg_quality(args.jpeg_quality)
         .metadata(reader.info.metadata);
 
     if let Some(layer) = ocr_layer {
