@@ -223,6 +223,10 @@ fn print_execution_plan(args: &ConvertArgs, pdf_files: &[PathBuf]) {
         println!("  Chunk size: unlimited (all pages at once)");
     }
     println!("  GPU: {}", if args.effective_gpu() { "YES" } else { "NO" });
+    println!(
+        "  Skip existing: {}",
+        if args.skip_existing { "YES" } else { "NO" }
+    );
     println!("  Verbose: {}", args.verbose);
     println!();
     println!("Files:");
