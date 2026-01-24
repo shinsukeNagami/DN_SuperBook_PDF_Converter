@@ -124,8 +124,8 @@ pub struct ConvertArgs {
     #[arg(short, long, default_value_t = 0.5)]
     pub margin_trim: f32,
 
-    /// Output DPI
-    #[arg(long, default_value_t = 300)]
+    /// Output DPI (1-4800)
+    #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u32).range(1..=4800))]
     pub dpi: u32,
 
     /// Number of parallel threads

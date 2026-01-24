@@ -660,6 +660,11 @@ impl LopdfExtractor {
         which::which("magick").is_ok() || which::which("convert").is_ok()
     }
 
+    /// Check if pdftoppm (poppler-utils) is available
+    pub fn pdftoppm_available() -> bool {
+        which::which("pdftoppm").is_ok()
+    }
+
     /// Extract using best available method
     pub fn extract_auto(
         pdf_path: &Path,
@@ -671,8 +676,178 @@ impl LopdfExtractor {
             return MagickExtractor::extract_all(pdf_path, output_dir, options);
         }
 
+        // Try pdftoppm (poppler-utils) as second option
+        if Self::pdftoppm_available() {
+            return PopplerExtractor::extract_all(pdf_path, output_dir, options);
+        }
+
         // Fall back to pure Rust extraction
         Self::extract_all(pdf_path, output_dir, options)
+    }
+}
+
+/// Poppler-based extractor using pdftoppm
+pub struct PopplerExtractor;
+
+impl PopplerExtractor {
+    /// Extract a single page from PDF using pdftoppm
+    pub fn extract_page(
+        pdf_path: &Path,
+        page_index: usize,
+        output_path: &Path,
+        options: &ExtractOptions,
+    ) -> Result<ExtractedPage> {
+        if !pdf_path.exists() {
+            return Err(ExtractError::PdfNotFound(pdf_path.to_path_buf()));
+        }
+
+        // Create output directory if needed
+        if let Some(parent) = output_path.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+
+        // pdftoppm uses 1-based page numbers
+        let page_num = page_index + 1;
+
+        // Get output path without extension (pdftoppm adds its own)
+        let output_stem = output_path.with_extension("");
+        let output_stem_str = output_stem.to_string_lossy();
+
+        let mut cmd = Command::new("pdftoppm");
+        cmd.arg("-r").arg(options.dpi.to_string()); // Resolution
+        cmd.arg("-f").arg(page_num.to_string()); // First page
+        cmd.arg("-l").arg(page_num.to_string()); // Last page
+        cmd.arg("-singlefile"); // Single file output (no suffix)
+
+        // Set output format (pdftoppm doesn't support BMP, fallback to PNG)
+        match options.format {
+            ImageFormat::Png | ImageFormat::Bmp => {
+                cmd.arg("-png");
+            }
+            ImageFormat::Jpeg { quality } => {
+                cmd.arg("-jpeg");
+                cmd.arg("-jpegopt")
+                    .arg(format!("quality={}", quality));
+            }
+            ImageFormat::Tiff => {
+                cmd.arg("-tiff");
+            }
+        }
+
+        // Set colorspace
+        match options.colorspace {
+            ColorSpace::Grayscale => {
+                cmd.arg("-gray");
+            }
+            ColorSpace::Rgb | ColorSpace::Cmyk => {
+                // RGB is default for pdftoppm
+            }
+        }
+
+        // Input PDF and output prefix
+        cmd.arg(pdf_path);
+        cmd.arg(&*output_stem_str);
+
+        let output = cmd.output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ExtractError::ExternalToolError(format!(
+                "pdftoppm failed: {}",
+                stderr
+            )));
+        }
+
+        // pdftoppm creates file with extension based on format
+        // (BMP outputs as PNG since pdftoppm doesn't support BMP)
+        let actual_output = match options.format {
+            ImageFormat::Png | ImageFormat::Bmp => output_stem.with_extension("png"),
+            ImageFormat::Jpeg { .. } => output_stem.with_extension("jpg"),
+            ImageFormat::Tiff => output_stem.with_extension("tif"),
+        };
+
+        // Rename to expected output path if different
+        if actual_output != output_path {
+            std::fs::rename(&actual_output, output_path)?;
+        }
+
+        // Get image dimensions
+        let img = image::open(output_path).map_err(|e| ExtractError::ExtractionFailed {
+            page: page_index,
+            reason: e.to_string(),
+        })?;
+
+        Ok(ExtractedPage {
+            page_index,
+            path: output_path.to_path_buf(),
+            width: img.width(),
+            height: img.height(),
+            format: options.format,
+        })
+    }
+
+    /// Extract all pages from PDF using pdftoppm
+    pub fn extract_all(
+        pdf_path: &Path,
+        output_dir: &Path,
+        options: &ExtractOptions,
+    ) -> Result<Vec<ExtractedPage>> {
+        if !pdf_path.exists() {
+            return Err(ExtractError::PdfNotFound(pdf_path.to_path_buf()));
+        }
+
+        // Create output directory
+        if !output_dir.exists() {
+            std::fs::create_dir_all(output_dir)?;
+        }
+
+        // Get page count using pdfinfo
+        let page_count = Self::get_page_count(pdf_path)?;
+
+        // Extract pages
+        let extension = options.format.extension();
+        let mut results = Vec::with_capacity(page_count);
+
+        for i in 0..page_count {
+            let output_path = output_dir.join(format!("page_{:05}.{}", i, extension));
+
+            let result = Self::extract_page(pdf_path, i, &output_path, options)?;
+            results.push(result);
+
+            // Call progress callback if provided
+            if let Some(ref callback) = options.progress_callback {
+                callback(i + 1, page_count);
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Get page count using pdfinfo
+    fn get_page_count(pdf_path: &Path) -> Result<usize> {
+        let output = Command::new("pdfinfo").arg(pdf_path).output()?;
+
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.starts_with("Pages:") {
+                    if let Some(count_str) = line.split_whitespace().nth(1) {
+                        if let Ok(count) = count_str.parse::<usize>() {
+                            return Ok(count);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: try lopdf
+        let doc = lopdf::Document::load(pdf_path).map_err(|e| ExtractError::ExtractionFailed {
+            page: 0,
+            reason: format!("Failed to load PDF: {}", e),
+        })?;
+        Ok(doc.get_pages().len())
     }
 }
 
