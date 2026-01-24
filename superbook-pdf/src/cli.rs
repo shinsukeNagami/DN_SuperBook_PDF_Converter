@@ -2,7 +2,7 @@
 //!
 //! Provides command-line interface using clap derive macros.
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 
@@ -84,6 +84,16 @@ pub enum Commands {
     Convert(ConvertArgs),
     /// Show system information
     Info,
+    /// Show cache information for a processed file
+    CacheInfo(CacheInfoArgs),
+}
+
+/// Arguments for the cache-info command
+#[derive(Args, Debug)]
+pub struct CacheInfoArgs {
+    /// Path to the output PDF file (to show cache info)
+    #[arg(value_name = "OUTPUT_PDF")]
+    pub output_pdf: std::path::PathBuf,
 }
 
 /// Arguments for the convert command
@@ -1867,5 +1877,39 @@ mod tests {
             assert!(args.skip_existing);
             assert!(args.force);
         }
+    }
+
+    // ============ Cache Info Command Tests ============
+
+    #[test]
+    fn test_cache_info_command() {
+        let cli =
+            Cli::try_parse_from(["superbook-pdf", "cache-info", "output.pdf"]).unwrap();
+        if let Commands::CacheInfo(args) = cli.command {
+            assert_eq!(args.output_pdf, PathBuf::from("output.pdf"));
+        } else {
+            panic!("Expected CacheInfo command");
+        }
+    }
+
+    #[test]
+    fn test_cache_info_with_path() {
+        let cli = Cli::try_parse_from([
+            "superbook-pdf",
+            "cache-info",
+            "/path/to/output.pdf",
+        ])
+        .unwrap();
+        if let Commands::CacheInfo(args) = cli.command {
+            assert_eq!(args.output_pdf, PathBuf::from("/path/to/output.pdf"));
+        } else {
+            panic!("Expected CacheInfo command");
+        }
+    }
+
+    #[test]
+    fn test_cache_info_missing_path() {
+        let result = Cli::try_parse_from(["superbook-pdf", "cache-info"]);
+        assert!(result.is_err());
     }
 }

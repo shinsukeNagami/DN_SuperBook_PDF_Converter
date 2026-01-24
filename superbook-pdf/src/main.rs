@@ -17,6 +17,8 @@ use superbook_pdf::{
     ProcessingCache,
     ProcessingResult,
     should_skip_processing,
+    // CLI
+    CacheInfoArgs,
     Cli,
     // Phase 1-6: Advanced processing modules
     ColorAnalyzer,
@@ -56,6 +58,7 @@ fn main() {
     let result = match cli.command {
         Commands::Convert(args) => run_convert(&args),
         Commands::Info => run_info(),
+        Commands::CacheInfo(args) => run_cache_info(&args),
     };
 
     std::process::exit(match result {
@@ -1163,4 +1166,69 @@ fn check_tool(cmd: &str, name: &str) {
         Ok(path) => println!("  {}: {} (found)", name, path.display()),
         Err(_) => println!("  {}: Not found", name),
     }
+}
+
+fn run_cache_info(args: &CacheInfoArgs) -> Result<(), Box<dyn std::error::Error>> {
+    use chrono::{DateTime, Local, TimeZone};
+
+    let output_path = &args.output_pdf;
+
+    // Check if output file exists
+    if !output_path.exists() {
+        return Err(format!("Output file not found: {}", output_path.display()).into());
+    }
+
+    // Try to load cache
+    match ProcessingCache::load(output_path) {
+        Ok(cache) => {
+            println!("=== Cache Information ===");
+            println!();
+            println!("Output file: {}", output_path.display());
+            println!("Cache file:  {}", ProcessingCache::cache_path(output_path).display());
+            println!();
+
+            println!("Cache Version: {}", cache.version);
+            let processed_dt: DateTime<Local> = Local
+                .timestamp_opt(cache.processed_at as i64, 0)
+                .single()
+                .unwrap_or_else(Local::now);
+            println!("Processed at:  {}", processed_dt.format("%Y-%m-%d %H:%M:%S"));
+            println!();
+
+            println!("Source Digest:");
+            println!("  Modified:    {}", cache.digest.source_modified);
+            println!("  Size:        {} bytes", cache.digest.source_size);
+            println!("  Options:     {}", cache.digest.options_hash);
+            println!();
+
+            println!("Processing Result:");
+            println!("  Page count:  {}", cache.result.page_count);
+            println!(
+                "  Page shift:  {}",
+                cache
+                    .result
+                    .page_number_shift
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "none".to_string())
+            );
+            println!(
+                "  Vertical:    {}",
+                if cache.result.is_vertical { "yes" } else { "no" }
+            );
+            println!("  Elapsed:     {:.2}s", cache.result.elapsed_seconds);
+            println!(
+                "  Output size: {} bytes ({:.2} MB)",
+                cache.result.output_size,
+                cache.result.output_size as f64 / 1_048_576.0
+            );
+        }
+        Err(e) => {
+            println!("No cache found for: {}", output_path.display());
+            println!("Cache file would be: {}", ProcessingCache::cache_path(output_path).display());
+            println!();
+            println!("Reason: {}", e);
+        }
+    }
+
+    Ok(())
 }

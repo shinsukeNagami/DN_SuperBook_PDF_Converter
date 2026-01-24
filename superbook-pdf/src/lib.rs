@@ -141,8 +141,8 @@ pub use ai_bridge::{
     AiBridgeConfig, AiBridgeConfigBuilder, AiBridgeError, AiTool, SubprocessBridge,
 };
 pub use cli::{
-    create_page_progress_bar, create_progress_bar, create_spinner, Cli, Commands, ConvertArgs,
-    ExitCode,
+    create_page_progress_bar, create_progress_bar, create_spinner, CacheInfoArgs, Cli, Commands,
+    ConvertArgs, ExitCode,
 };
 pub use deskew::{
     DeskewAlgorithm, DeskewError, DeskewOptions, DeskewOptionsBuilder, DeskewResult,
