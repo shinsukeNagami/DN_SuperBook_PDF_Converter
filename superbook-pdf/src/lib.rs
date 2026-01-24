@@ -119,9 +119,12 @@
 
 pub mod ai_bridge;
 pub mod cli;
+pub mod color_stats;
 pub mod deskew;
+pub mod finalize;
 pub mod image_extract;
 pub mod margin;
+pub mod normalize;
 pub mod page_number;
 pub mod pdf_reader;
 pub mod pdf_writer;
