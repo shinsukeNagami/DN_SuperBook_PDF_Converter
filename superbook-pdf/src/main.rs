@@ -717,7 +717,7 @@ fn process_single_pdf(
         vec![]
     };
 
-    // Step 7: Generate output PDF
+    // Step 12: Generate output PDF
     if verbose {
         println!("  Generating output PDF...");
     }

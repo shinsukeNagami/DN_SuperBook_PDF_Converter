@@ -2486,7 +2486,9 @@ mod tests {
 
         for handle in handles {
             let threshold = handle.join().unwrap();
-            assert!(threshold <= 255);
+            // threshold is u8, so it's always <= 255 by definition
+            // just verify the thread completed successfully
+            assert!(threshold > 0);
         }
     }
 
