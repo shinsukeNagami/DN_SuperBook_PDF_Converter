@@ -60,6 +60,7 @@ impl ImageProcDeskewer {
             DeskewAlgorithm::ProjectionProfile => Self::detect_skew_projection(&gray, options),
             DeskewAlgorithm::TextLineDetection => Self::detect_skew_text_lines(&gray, options),
             DeskewAlgorithm::Combined => Self::detect_skew_combined(&gray, options),
+            DeskewAlgorithm::PageEdge => Self::detect_skew_page_edge(&gray, options),
         }
     }
 
@@ -672,6 +673,127 @@ impl ImageProcDeskewer {
             confidence,
             feature_count: angles.len(),
         })
+    }
+
+
+    /// Detect skew based on page edge (for scanned book pages)
+    ///
+    /// This method detects skew by finding the page boundary shadow that appears
+    /// in scanned book pages. It's more effective than text-line detection when
+    /// the physical book page was scanned at an angle.
+    ///
+    /// # Algorithm
+    /// 1. Apply a 3-pixel Sobel-like horizontal gradient filter
+    /// 2. Find first significant negative gradient in each row (white-to-gray transition)
+    /// 3. Filter outliers using median-based approach
+    /// 4. Fit a line to inlier points
+    /// 5. Calculate the deviation from vertical
+    ///
+    /// # Arguments
+    /// * `gray` - Input grayscale image
+    /// * `options` - Deskew options
+    ///
+    /// # Returns
+    /// Skew detection result with angle and confidence
+    pub fn detect_skew_page_edge(gray: &GrayImage, options: &DeskewOptions) -> Result<SkewDetection> {
+        let (width, height) = gray.dimensions();
+        let search_width = width / 2;
+        let gradient_threshold: i32 = -5;  // Sobel gradient threshold
+        
+        let mut boundary_points: Vec<(f64, f64)> = Vec::new();
+        
+        // For each row, apply Sobel-like gradient and find first significant edge
+        for y in 0..height {
+            for x in 2..search_width {
+                // Sobel-like horizontal gradient: [-1, 0, +1]
+                let left = gray.get_pixel(x - 2, y).0[0] as i32;
+                let right = gray.get_pixel(x, y).0[0] as i32;
+                let gradient = right - left;
+                
+                if gradient < gradient_threshold {
+                    boundary_points.push((x as f64, y as f64));
+                    break;
+                }
+            }
+        }
+        
+        if boundary_points.len() < (height / 3) as usize {
+            // Not enough points found
+            return Ok(SkewDetection {
+                angle: 0.0,
+                confidence: 0.0,
+                feature_count: 0,
+            });
+        }
+        
+        // Calculate median x to remove outliers
+        let mut x_values: Vec<f64> = boundary_points.iter().map(|(x, _)| *x).collect();
+        x_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median_x = x_values[x_values.len() / 2];
+        
+        // Filter to points near the median (within 50 pixels)
+        let inlier_threshold = 50.0;
+        let inliers: Vec<(f64, f64)> = boundary_points
+            .into_iter()
+            .filter(|(x, _)| (*x - median_x).abs() < inlier_threshold)
+            .collect();
+        
+        if inliers.len() < 100 {
+            return Ok(SkewDetection {
+                angle: 0.0,
+                confidence: 0.0,
+                feature_count: inliers.len(),
+            });
+        }
+        
+        // Fit a line using linear regression: x = m * y + b
+        let angle = Self::fit_line_angle(&inliers);
+        
+        match angle {
+            Some(a) => {
+                let clamped_angle = a.clamp(-options.max_angle, options.max_angle);
+                let confidence = (inliers.len() as f64 / height as f64).min(1.0);
+                
+                Ok(SkewDetection {
+                    angle: clamped_angle,
+                    confidence,
+                    feature_count: inliers.len(),
+                })
+            }
+            None => Ok(SkewDetection {
+                angle: 0.0,
+                confidence: 0.0,
+                feature_count: 0,
+            }),
+        }
+    }
+    
+    /// Fit a line to points and return the angle from vertical
+    fn fit_line_angle(points: &[(f64, f64)]) -> Option<f64> {
+        if points.len() < 10 {
+            return None;
+        }
+        
+        // Simple linear regression: x = m * y + b
+        // We want to find the angle of this line from vertical
+        let n = points.len() as f64;
+        let sum_x: f64 = points.iter().map(|(x, _)| x).sum();
+        let sum_y: f64 = points.iter().map(|(_, y)| y).sum();
+        let sum_xy: f64 = points.iter().map(|(x, y)| x * y).sum();
+        let sum_yy: f64 = points.iter().map(|(_, y)| y * y).sum();
+        
+        let denominator = n * sum_yy - sum_y * sum_y;
+        if denominator.abs() < 1e-10 {
+            return None;
+        }
+        
+        let slope = (n * sum_xy - sum_x * sum_y) / denominator;
+        
+        // Angle from vertical: arctan(slope) where slope = dx/dy
+        let angle_rad = slope.atan();
+        let angle_deg = angle_rad.to_degrees();
+        
+        Some(angle_deg)
     }
 
     /// Hough transform based line angle detection

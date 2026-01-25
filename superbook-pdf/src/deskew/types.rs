@@ -68,6 +68,8 @@ pub enum DeskewAlgorithm {
     TextLineDetection,
     /// Combined (average of multiple methods)
     Combined,
+    /// Page edge detection (for scanned book pages)
+    PageEdge,
 }
 
 /// Quality modes for rotation

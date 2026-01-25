@@ -595,7 +595,10 @@ impl PdfPipeline {
         let deskewed_dir = work_dir.join("deskewed");
         std::fs::create_dir_all(&deskewed_dir)?;
 
-        let deskew_options = crate::DeskewOptions::default();
+        // Use PageEdge algorithm for scanned book pages (detects page boundary skew)
+        let deskew_options = crate::DeskewOptions::builder()
+            .algorithm(crate::DeskewAlgorithm::PageEdge)
+            .build();
         let output_paths: Vec<PathBuf> = images
             .iter()
             .enumerate()
