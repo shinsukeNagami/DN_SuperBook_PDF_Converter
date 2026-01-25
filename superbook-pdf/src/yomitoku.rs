@@ -434,6 +434,7 @@ impl YomiToku {
     }
 
     /// Parse text blocks from JSON output
+    #[allow(dead_code)]
     fn parse_text_blocks(&self, json: &serde_json::Value) -> Result<Vec<TextBlock>> {
         let blocks = json
             .get("blocks")
@@ -542,6 +543,7 @@ impl YomiToku {
     }
 
     /// Calculate overall confidence from text blocks
+    #[allow(dead_code)]
     fn calculate_overall_confidence(&self, blocks: &[TextBlock]) -> f32 {
         if blocks.is_empty() {
             return 0.0;

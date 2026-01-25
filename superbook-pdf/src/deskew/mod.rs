@@ -925,6 +925,7 @@ mod tests {
             DeskewAlgorithm::ProjectionProfile,
             DeskewAlgorithm::TextLineDetection,
             DeskewAlgorithm::Combined,
+            DeskewAlgorithm::PageEdge,
         ];
 
         for algorithm in algorithms {
@@ -942,6 +943,9 @@ mod tests {
                 }
                 DeskewAlgorithm::Combined => {
                     assert!(matches!(opts.algorithm, DeskewAlgorithm::Combined))
+                }
+                DeskewAlgorithm::PageEdge => {
+                    assert!(matches!(opts.algorithm, DeskewAlgorithm::PageEdge))
                 }
             }
         }
