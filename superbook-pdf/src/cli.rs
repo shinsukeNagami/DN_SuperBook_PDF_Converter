@@ -82,6 +82,8 @@ pub struct Cli {
 pub enum Commands {
     /// Convert PDF files with AI enhancement
     Convert(ConvertArgs),
+    /// Reprocess failed pages from a previous conversion
+    Reprocess(ReprocessArgs),
     /// Show system information
     Info,
     /// Show cache information for a processed file
@@ -97,6 +99,60 @@ pub struct CacheInfoArgs {
     /// Path to the output PDF file (to show cache info)
     #[arg(value_name = "OUTPUT_PDF")]
     pub output_pdf: std::path::PathBuf,
+}
+
+/// Arguments for the reprocess command
+#[derive(Args, Debug, Clone)]
+pub struct ReprocessArgs {
+    /// PDF file or state file path (.superbook-state.json)
+    #[arg(value_name = "INPUT")]
+    pub input: PathBuf,
+
+    /// Specific pages to retry (comma-separated, 0-indexed)
+    #[arg(short, long, value_delimiter = ',')]
+    pub pages: Option<Vec<usize>>,
+
+    /// Maximum retry attempts per page
+    #[arg(long, default_value = "3")]
+    pub max_retries: u32,
+
+    /// Force reprocess all failed pages
+    #[arg(short, long)]
+    pub force: bool,
+
+    /// Show status only, don't process
+    #[arg(long)]
+    pub status: bool,
+
+    /// Output directory (only if input is PDF, not state file)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Keep intermediate files
+    #[arg(long)]
+    pub keep_intermediates: bool,
+
+    /// Verbosity level (-v, -vv, -vvv)
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    pub verbose: u8,
+
+    /// Suppress progress output
+    #[arg(short, long)]
+    pub quiet: bool,
+}
+
+impl ReprocessArgs {
+    /// Check if the input is a state file
+    pub fn is_state_file(&self) -> bool {
+        self.input
+            .to_string_lossy()
+            .ends_with(".superbook-state.json")
+    }
+
+    /// Get page indices to reprocess (empty means all failed)
+    pub fn page_indices(&self) -> Vec<usize> {
+        self.pages.clone().unwrap_or_default()
+    }
 }
 
 /// Arguments for the serve command (web server)
@@ -1951,5 +2007,231 @@ mod tests {
     fn test_cache_info_missing_path() {
         let result = Cli::try_parse_from(["superbook-pdf", "cache-info"]);
         assert!(result.is_err());
+    }
+
+    // ============ Reprocess Command Tests ============
+
+    #[test]
+    fn test_reprocess_command_basic() {
+        let cli = Cli::try_parse_from(["superbook-pdf", "reprocess", "input.pdf"]).unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            assert_eq!(args.input, PathBuf::from("input.pdf"));
+            assert!(args.pages.is_none());
+            assert_eq!(args.max_retries, 3);
+            assert!(!args.force);
+            assert!(!args.status);
+        } else {
+            panic!("Expected Reprocess command");
+        }
+    }
+
+    #[test]
+    fn test_reprocess_with_status() {
+        let cli =
+            Cli::try_parse_from(["superbook-pdf", "reprocess", "input.pdf", "--status"]).unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            assert!(args.status);
+        } else {
+            panic!("Expected Reprocess command");
+        }
+    }
+
+    #[test]
+    fn test_reprocess_with_pages() {
+        let cli = Cli::try_parse_from([
+            "superbook-pdf",
+            "reprocess",
+            "input.pdf",
+            "--pages",
+            "1,3,5,10",
+        ])
+        .unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            assert_eq!(args.pages, Some(vec![1, 3, 5, 10]));
+            assert_eq!(args.page_indices(), vec![1, 3, 5, 10]);
+        } else {
+            panic!("Expected Reprocess command");
+        }
+    }
+
+    #[test]
+    fn test_reprocess_with_max_retries() {
+        let cli = Cli::try_parse_from([
+            "superbook-pdf",
+            "reprocess",
+            "input.pdf",
+            "--max-retries",
+            "5",
+        ])
+        .unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            assert_eq!(args.max_retries, 5);
+        } else {
+            panic!("Expected Reprocess command");
+        }
+    }
+
+    #[test]
+    fn test_reprocess_with_force() {
+        let cli =
+            Cli::try_parse_from(["superbook-pdf", "reprocess", "input.pdf", "--force"]).unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            assert!(args.force);
+        } else {
+            panic!("Expected Reprocess command");
+        }
+    }
+
+    #[test]
+    fn test_reprocess_with_force_short() {
+        let cli = Cli::try_parse_from(["superbook-pdf", "reprocess", "input.pdf", "-f"]).unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            assert!(args.force);
+        } else {
+            panic!("Expected Reprocess command");
+        }
+    }
+
+    #[test]
+    fn test_reprocess_with_output() {
+        let cli = Cli::try_parse_from([
+            "superbook-pdf",
+            "reprocess",
+            "input.pdf",
+            "--output",
+            "/custom/output",
+        ])
+        .unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            assert_eq!(args.output, Some(PathBuf::from("/custom/output")));
+        } else {
+            panic!("Expected Reprocess command");
+        }
+    }
+
+    #[test]
+    fn test_reprocess_with_keep_intermediates() {
+        let cli = Cli::try_parse_from([
+            "superbook-pdf",
+            "reprocess",
+            "input.pdf",
+            "--keep-intermediates",
+        ])
+        .unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            assert!(args.keep_intermediates);
+        } else {
+            panic!("Expected Reprocess command");
+        }
+    }
+
+    #[test]
+    fn test_reprocess_with_verbose() {
+        let cli =
+            Cli::try_parse_from(["superbook-pdf", "reprocess", "input.pdf", "-vvv"]).unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            assert_eq!(args.verbose, 3);
+        } else {
+            panic!("Expected Reprocess command");
+        }
+    }
+
+    #[test]
+    fn test_reprocess_with_quiet() {
+        let cli =
+            Cli::try_parse_from(["superbook-pdf", "reprocess", "input.pdf", "-q"]).unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            assert!(args.quiet);
+        } else {
+            panic!("Expected Reprocess command");
+        }
+    }
+
+    #[test]
+    fn test_reprocess_state_file_detection() {
+        let cli = Cli::try_parse_from([
+            "superbook-pdf",
+            "reprocess",
+            "output/.superbook-state.json",
+        ])
+        .unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            assert!(args.is_state_file());
+        } else {
+            panic!("Expected Reprocess command");
+        }
+
+        let cli2 = Cli::try_parse_from(["superbook-pdf", "reprocess", "input.pdf"]).unwrap();
+        if let Commands::Reprocess(args) = cli2.command {
+            assert!(!args.is_state_file());
+        } else {
+            panic!("Expected Reprocess command");
+        }
+    }
+
+    #[test]
+    fn test_reprocess_page_indices_empty() {
+        let cli = Cli::try_parse_from(["superbook-pdf", "reprocess", "input.pdf"]).unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            assert!(args.page_indices().is_empty());
+        } else {
+            panic!("Expected Reprocess command");
+        }
+    }
+
+    #[test]
+    fn test_reprocess_full_options() {
+        let cli = Cli::try_parse_from([
+            "superbook-pdf",
+            "reprocess",
+            "input.pdf",
+            "--pages",
+            "1,2,3",
+            "--max-retries",
+            "5",
+            "--force",
+            "--output",
+            "/custom/output",
+            "--keep-intermediates",
+            "-vv",
+        ])
+        .unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            assert_eq!(args.input, PathBuf::from("input.pdf"));
+            assert_eq!(args.pages, Some(vec![1, 2, 3]));
+            assert_eq!(args.max_retries, 5);
+            assert!(args.force);
+            assert_eq!(args.output, Some(PathBuf::from("/custom/output")));
+            assert!(args.keep_intermediates);
+            assert_eq!(args.verbose, 2);
+        } else {
+            panic!("Expected Reprocess command");
+        }
+    }
+
+    #[test]
+    fn test_reprocess_missing_input() {
+        let result = Cli::try_parse_from(["superbook-pdf", "reprocess"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reprocess_debug_impl() {
+        let cli = Cli::try_parse_from(["superbook-pdf", "reprocess", "input.pdf"]).unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(debug_str.contains("Reprocess"));
+    }
+
+    #[test]
+    fn test_reprocess_args_clone() {
+        let cli = Cli::try_parse_from(["superbook-pdf", "reprocess", "input.pdf", "--force"])
+            .unwrap();
+        if let Commands::Reprocess(args) = cli.command {
+            let cloned = args.clone();
+            assert_eq!(args.input, cloned.input);
+            assert_eq!(args.force, cloned.force);
+        } else {
+            panic!("Expected Reprocess command");
+        }
     }
 }

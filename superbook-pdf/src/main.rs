@@ -11,13 +11,15 @@ use superbook_pdf::{
     // Cache module
     CacheDigest, ProcessingCache, should_skip_processing,
     // CLI
-    CacheInfoArgs, Cli, Commands, ConvertArgs,
+    CacheInfoArgs, Cli, Commands, ConvertArgs, ReprocessArgs,
     // Config
     CliOverrides, Config,
     // Pipeline
     PdfPipeline, ProgressCallback,
     // Progress tracking
     ProgressTracker,
+    // Reprocess
+    PageStatus, ReprocessOptions, ReprocessState,
 };
 
 #[cfg(feature = "web")]
@@ -28,6 +30,7 @@ fn main() {
 
     let result = match cli.command {
         Commands::Convert(args) => run_convert(&args),
+        Commands::Reprocess(args) => run_reprocess(&args),
         Commands::Info => run_info(),
         Commands::CacheInfo(args) => run_cache_info(&args),
         #[cfg(feature = "web")]
@@ -588,6 +591,176 @@ fn run_cache_info(args: &CacheInfoArgs) -> Result<(), Box<dyn std::error::Error>
     }
 
     Ok(())
+}
+
+// ============ Reprocess Command ============
+
+fn run_reprocess(args: &ReprocessArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let start_time = Instant::now();
+    let verbose = args.verbose > 0;
+
+    // Determine if input is a state file or PDF
+    let state_path = if args.is_state_file() {
+        args.input.clone()
+    } else {
+        // For PDF input, look for state file in output directory
+        let output_dir = args.output.clone().unwrap_or_else(|| {
+            args.input.parent().unwrap_or(std::path::Path::new(".")).join("output")
+        });
+        output_dir.join(".superbook-state.json")
+    };
+
+    // Load or create state
+    let mut state = if state_path.exists() {
+        ReprocessState::load(&state_path)?
+    } else {
+        if args.is_state_file() {
+            return Err(format!("State file not found: {}", state_path.display()).into());
+        }
+        // No existing state - need to run initial processing first
+        return Err("No processing state found. Please run 'convert' command first to create initial state.".into());
+    };
+
+    // Status-only mode
+    if args.status {
+        print_reprocess_status(&state);
+        return Ok(());
+    }
+
+    // Get failed pages to reprocess
+    let failed_pages = if !args.page_indices().is_empty() {
+        args.page_indices()
+    } else {
+        state.failed_pages()
+    };
+
+    if failed_pages.is_empty() {
+        println!("No failed pages to reprocess.");
+        println!("Completion: {:.1}%", state.completion_percent());
+        return Ok(());
+    }
+
+    if verbose {
+        println!("Reprocessing {} failed page(s)...", failed_pages.len());
+        println!("Pages: {:?}", failed_pages);
+    }
+
+    // Create reprocess options
+    let options = ReprocessOptions {
+        max_retries: args.max_retries,
+        page_indices: args.page_indices(),
+        force: args.force,
+        keep_intermediates: args.keep_intermediates,
+    };
+
+    // Track results
+    let success_count = 0usize;
+    let mut still_failed = 0usize;
+
+    // Process each failed page
+    for &page_idx in &failed_pages {
+        if page_idx >= state.pages.len() {
+            eprintln!("Warning: Page index {} out of range (total: {})", page_idx, state.pages.len());
+            continue;
+        }
+
+        // Check retry count
+        if let PageStatus::Failed { retry_count, .. } = &state.pages[page_idx] {
+            if *retry_count >= options.max_retries && !args.force {
+                if verbose {
+                    println!("  Page {}: Skipped (max retries {} exceeded)", page_idx, options.max_retries);
+                }
+                still_failed += 1;
+                continue;
+            }
+        }
+
+        if verbose {
+            println!("  Processing page {}...", page_idx);
+        }
+
+        // Note: Actual reprocessing would require pipeline integration
+        // For now, we increment retry count and leave as failed
+        // This is a placeholder for full pipeline integration
+        if let PageStatus::Failed { error, retry_count } = &state.pages[page_idx] {
+            state.pages[page_idx] = PageStatus::Failed {
+                error: error.clone(),
+                retry_count: retry_count + 1,
+            };
+            still_failed += 1;
+
+            // In a full implementation, we would:
+            // 1. Load the pipeline with same config
+            // 2. Re-extract the specific page
+            // 3. Run through deskew, margin, upscale, etc.
+            // 4. Update state to Success or Failed
+        }
+    }
+
+    // Update state timestamps
+    state.updated_at = chrono::Utc::now().to_rfc3339();
+
+    // Save state
+    state.save(&state_path)?;
+
+    let elapsed = start_time.elapsed();
+
+    // Print summary
+    if !args.quiet {
+        println!();
+        println!("=== Reprocess Summary ===");
+        println!("Total pages:      {}", state.pages.len());
+        println!("Reprocessed:      {}", failed_pages.len());
+        println!("Now successful:   {}", success_count);
+        println!("Still failing:    {}", still_failed);
+        println!("Completion:       {:.1}%", state.completion_percent());
+        println!("Time elapsed:     {:.2}s", elapsed.as_secs_f64());
+
+        if state.is_complete() {
+            println!();
+            println!("All pages processed successfully!");
+        } else {
+            let remaining_failed = state.failed_pages();
+            if !remaining_failed.is_empty() {
+                println!();
+                println!("Remaining failed pages: {:?}", remaining_failed);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn print_reprocess_status(state: &ReprocessState) {
+    println!("=== Reprocess Status ===");
+    println!();
+    println!("Source PDF:   {}", state.source_pdf.display());
+    println!("Output dir:   {}", state.output_dir.display());
+    println!("Config hash:  {}", state.config_hash);
+    println!("Created:      {}", state.created_at);
+    println!("Updated:      {}", state.updated_at);
+    println!();
+    println!("Pages: {} total", state.pages.len());
+
+    let success_count = state.success_pages().len();
+    let failed_pages = state.failed_pages();
+    let pending_count = state.pages.iter().filter(|p| matches!(p, PageStatus::Pending)).count();
+
+    println!("  Success: {}", success_count);
+    println!("  Failed:  {}", failed_pages.len());
+    println!("  Pending: {}", pending_count);
+    println!();
+    println!("Completion: {:.1}%", state.completion_percent());
+
+    if !failed_pages.is_empty() {
+        println!();
+        println!("Failed pages:");
+        for idx in &failed_pages {
+            if let PageStatus::Failed { error, retry_count } = &state.pages[*idx] {
+                println!("  Page {}: {} (retries: {})", idx, error, retry_count);
+            }
+        }
+    }
 }
 
 // ============ Serve Command (Web Server) ============

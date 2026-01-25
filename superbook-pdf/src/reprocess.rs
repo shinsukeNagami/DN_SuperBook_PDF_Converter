@@ -61,7 +61,7 @@ pub type Result<T> = std::result::Result<T, ReprocessError>;
 // ============================================================
 
 /// Page processing status
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum PageStatus {
     /// Successfully processed
     Success {
@@ -78,6 +78,7 @@ pub enum PageStatus {
         retry_count: u32,
     },
     /// Not yet processed
+    #[default]
     Pending,
 }
 
@@ -126,12 +127,6 @@ impl PageStatus {
         if let PageStatus::Failed { retry_count, .. } = self {
             *retry_count += 1;
         }
-    }
-}
-
-impl Default for PageStatus {
-    fn default() -> Self {
-        PageStatus::Pending
     }
 }
 

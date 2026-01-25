@@ -147,7 +147,7 @@ pub use ai_bridge::{
 };
 pub use cli::{
     create_page_progress_bar, create_progress_bar, create_spinner, CacheInfoArgs, Cli, Commands,
-    ConvertArgs, ExitCode,
+    ConvertArgs, ExitCode, ReprocessArgs,
 };
 #[cfg(feature = "web")]
 pub use cli::ServeArgs;
