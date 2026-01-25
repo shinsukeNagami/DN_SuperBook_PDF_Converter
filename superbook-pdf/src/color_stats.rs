@@ -167,8 +167,10 @@ impl Default for BleedSuppression {
         Self {
             hue_min: 20.0,
             hue_max: 65.0,
-            saturation_max: 0.30,
-            value_min: 0.70,
+            // C# version uses BleedValueMin = 0.35, no saturation check
+            // But we keep saturation_max for additional filtering
+            saturation_max: 1.0,  // No saturation filter (match C# behavior)
+            value_min: 0.35,      // Match C# BleedValueMin = 0.35
             enabled: true,
             strength: 1.0,
         }
@@ -1257,31 +1259,32 @@ mod tests {
     // Phase 1.3: BleedSuppression Tests
     // ============================================================
 
-    // TC-BLEED-001: BleedSuppression デフォルト値
+    // TC-BLEED-001: BleedSuppression デフォルト値 (C#互換)
     #[test]
     fn test_bleed_suppression_default() {
         let bleed = BleedSuppression::default();
         assert_eq!(bleed.hue_min, 20.0);
         assert_eq!(bleed.hue_max, 65.0);
-        assert_eq!(bleed.saturation_max, 0.30);
-        assert_eq!(bleed.value_min, 0.70);
+        // C# version: no saturation filter, BleedValueMin = 0.35
+        assert_eq!(bleed.saturation_max, 1.0);  // No saturation filter
+        assert_eq!(bleed.value_min, 0.35);      // Match C# BleedValueMin
         assert!(bleed.enabled);
         assert_eq!(bleed.strength, 1.0);
     }
 
-    // TC-BLEED-002: 裏写り検出 - 黄色系
+    // TC-BLEED-002: 裏写り検出 - 黄色系 (C#互換)
     #[test]
     fn test_bleed_detection_yellow_bleed() {
         let bleed = BleedSuppression::default();
 
-        // Yellow bleed-through (hue=40, low sat, high val)
+        // Yellow bleed-through (hue=40, any sat, high val)
         assert!(bleed.is_bleed_through(40.0, 0.2, 0.8));
 
-        // Not bleed: high saturation yellow
-        assert!(!bleed.is_bleed_through(40.0, 0.5, 0.8));
+        // C# version doesn't filter by saturation, so high sat yellow is also bleed
+        assert!(bleed.is_bleed_through(40.0, 0.5, 0.8));
 
-        // Not bleed: dark yellow
-        assert!(!bleed.is_bleed_through(40.0, 0.2, 0.5));
+        // Not bleed: dark yellow (value < 0.35)
+        assert!(!bleed.is_bleed_through(40.0, 0.2, 0.3));
     }
 
     // TC-BLEED-003: 裏写り検出 - 範囲外
