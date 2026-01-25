@@ -48,6 +48,7 @@ superbook-pdf は、スキャンされた書籍PDFを高品質なデジタル書
 | RealESRGAN | realesrgan.rs | AI画像鮮明化 (Python連携) |
 | YomiToku | yomitoku.rs | 日本語OCR (Python連携) |
 | AI Bridge | ai_bridge.rs | Python subprocess管理 |
+| Reprocess | reprocess.rs | 部分再処理・失敗ページリトライ |
 | Util | util.rs | ユーティリティ関数 |
 
 ## CLIオプション
@@ -85,7 +86,7 @@ superbook-pdf は、スキャンされた書籍PDFを高品質なデジタル書
 
 | 項目 | 状態 | 備考 |
 |------|------|------|
-| テスト | ✅ 1,491件 | 全てパス、Clippy警告0件 |
+| テスト | ✅ 1,515件 | 全てパス、Clippy警告0件 |
 | メモリ使用量 | ✅ 0.4-0.8GB | C#版の1/30 |
 | C#→Rust移行 | ✅ 100% | 全機能移植完了 |
 | main.rs リファクタリング | ✅ 完了 | 1,234行→394行 (68%削減) |
