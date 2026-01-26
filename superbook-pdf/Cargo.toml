@@ -2,9 +2,25 @@
 name = "superbook-pdf"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75"
 license = "AGPL-3.0"
-description = "High-quality PDF converter for scanned books with AI enhancement"
-authors = ["DN_SuperBook_PDF_Converter Contributors"]
+description = "High-quality PDF converter for scanned books with AI enhancement, deskew correction, and Japanese OCR"
+authors = ["clearclown", "Daiyuu Nobori <original author>"]
+repository = "https://github.com/clearclown/DN_SuperBook_PDF_Converter_Linux"
+homepage = "https://github.com/clearclown/DN_SuperBook_PDF_Converter_Linux"
+documentation = "https://docs.rs/superbook-pdf"
+readme = "README.md"
+keywords = ["pdf", "scanner", "ocr", "image-processing", "deskew"]
+categories = ["command-line-utilities", "multimedia::images", "text-processing"]
+exclude = [
+    "tests/*",
+    "specs/*",
+    "docker/*",
+    ".github/*",
+    "compose.yml",
+    "Containerfile",
+    "Taskfile.yml",
+]
 
 [dependencies]
 # CLI

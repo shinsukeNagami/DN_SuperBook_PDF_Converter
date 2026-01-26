@@ -71,7 +71,15 @@ impl From<ExitCode> for std::process::ExitCode {
 #[command(name = "superbook-pdf")]
 #[command(author = "DN_SuperBook_PDF_Converter Contributors")]
 #[command(version)]
-#[command(about = "High-quality PDF converter for scanned books", long_about = None)]
+#[command(about = "High-quality PDF converter for scanned books")]
+#[command(after_help = r#"
+Quick Start:
+  superbook-pdf convert input.pdf -o output/           # 基本変換
+  superbook-pdf convert input.pdf -o output/ --advanced --ocr  # 高品質変換
+  superbook-pdf serve --port 8080                      # Web UI起動
+
+詳細は `superbook-pdf <COMMAND> --help` を参照
+"#)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -190,12 +198,29 @@ pub struct ServeArgs {
 
 /// Arguments for the convert command
 #[derive(clap::Args, Debug)]
+#[command(after_help = r#"
+Examples:
+  # 基本的な変換
+  superbook-pdf convert input.pdf -o output/
+
+  # AI超解像 + OCR付き高品質変換
+  superbook-pdf convert input.pdf -o output/ --advanced --ocr
+
+  # GPU無効化 (CPUのみ)
+  superbook-pdf convert input.pdf -o output/ --no-gpu
+
+  # 最初の10ページのみテスト
+  superbook-pdf convert input.pdf -o output/ --max-pages 10
+
+  # 詳細ログ出力
+  superbook-pdf convert input.pdf -o output/ -vvv
+"#)]
 pub struct ConvertArgs {
     /// Input PDF file or directory
     pub input: PathBuf,
 
     /// Output directory
-    #[arg(default_value = "./output")]
+    #[arg(short = 'o', long = "output", default_value = "./output")]
     pub output: PathBuf,
 
     /// Configuration file path (TOML format)
@@ -203,7 +228,7 @@ pub struct ConvertArgs {
     pub config: Option<PathBuf>,
 
     /// Enable Japanese OCR (YomiToku)
-    #[arg(short, long)]
+    #[arg(long)]
     pub ocr: bool,
 
     /// Enable AI upscaling (RealESRGAN)
@@ -285,7 +310,8 @@ pub struct ConvertArgs {
     #[arg(long, default_value_t = 3508)]
     pub output_height: u32,
 
-    /// Enable advanced processing (combines internal-resolution, color-correction, offset-alignment)
+    /// Enable advanced processing for best quality output
+    /// (includes: internal resolution normalization, color correction, offset alignment)
     #[arg(long)]
     pub advanced: bool,
 
@@ -757,10 +783,10 @@ mod tests {
         }
     }
 
-    // Test output path argument (positional)
+    // Test output path argument (--output / -o)
     #[test]
     fn test_output_path() {
-        let cli = Cli::try_parse_from(["superbook-pdf", "convert", "input.pdf", "/custom/output"])
+        let cli = Cli::try_parse_from(["superbook-pdf", "convert", "input.pdf", "-o", "/custom/output"])
             .unwrap();
 
         if let Commands::Convert(args) = cli.command {
@@ -1028,6 +1054,7 @@ mod tests {
             "superbook-pdf",
             "convert",
             "input.pdf",
+            "-o",
             "/custom/output/directory",
         ])
         .unwrap();
@@ -1204,10 +1231,10 @@ mod tests {
     // ============ Short Flag Tests ============
 
     #[test]
-    fn test_short_flag_o_ocr() {
-        let cli = Cli::try_parse_from(["superbook-pdf", "convert", "input.pdf", "-o"]).unwrap();
+    fn test_short_flag_o_output() {
+        let cli = Cli::try_parse_from(["superbook-pdf", "convert", "input.pdf", "-o", "/custom/out"]).unwrap();
         if let Commands::Convert(args) = cli.command {
-            assert!(args.ocr);
+            assert_eq!(args.output, PathBuf::from("/custom/out"));
         }
     }
 
@@ -1718,7 +1745,7 @@ mod tests {
 
         for output in outputs {
             let cli =
-                Cli::try_parse_from(["superbook-pdf", "convert", "input.pdf", output]).unwrap();
+                Cli::try_parse_from(["superbook-pdf", "convert", "input.pdf", "-o", output]).unwrap();
             if let Commands::Convert(args) = cli.command {
                 assert_eq!(args.output.to_string_lossy(), output);
             }
