@@ -41,6 +41,15 @@ use thiserror::Error;
 // Constants
 // ============================================================
 
+/// ImageMagick command name
+const MAGICK_CMD: &str = "magick";
+/// Legacy ImageMagick command name (Unix only)
+const CONVERT_CMD: &str = "convert";
+/// Poppler pdftoppm command name
+const PDFTOPPM_CMD: &str = "pdftoppm";
+/// Poppler pdfinfo command name
+const PDFINFO_CMD: &str = "pdfinfo";
+
 /// Standard DPI for document scanning
 const DEFAULT_DPI: u32 = 300;
 
@@ -58,6 +67,102 @@ const MAX_DPI: u32 = 1200;
 
 /// Default white background color
 const WHITE_BACKGROUND: [u8; 3] = [255, 255, 255];
+
+// ============================================================
+// Helper Functions
+// ============================================================
+
+/// Resolve the absolute path of an external tool using `which`.
+///
+/// On Windows, certain command names (like "convert") conflict with system utilities,
+/// so this function allows specifying fallback commands for Unix-like systems.
+fn resolve_tool_path(primary: &str, fallback: Option<&str>) -> Option<PathBuf> {
+    if let Ok(path) = which::which(primary) {
+        return Some(path);
+    }
+
+    // On Windows, skip fallback commands that conflict with system utilities
+    if cfg!(windows) {
+        return None;
+    }
+
+    if let Some(fallback_cmd) = fallback {
+        if let Ok(path) = which::which(fallback_cmd) {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
+/// Get page count from a PDF file using available tools.
+///
+/// Tries the following methods in order:
+/// 1. pdfinfo (from Poppler utilities)
+/// 2. ImageMagick identify
+/// 3. lopdf (pure Rust fallback)
+fn get_pdf_page_count(pdf_path: &Path) -> Result<usize> {
+    // Try pdfinfo first
+    if let Some(pdfinfo_path) = resolve_tool_path(PDFINFO_CMD, None) {
+        if let Ok(output) = Command::new(&pdfinfo_path).arg(pdf_path).output() {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    if line.starts_with("Pages:") {
+                        if let Some(count_str) = line.split_whitespace().nth(1) {
+                            if let Ok(count) = count_str.parse::<usize>() {
+                                return Ok(count);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Try ImageMagick identify
+    if let Some(magick_path) = resolve_tool_path(MAGICK_CMD, None) {
+        if let Ok(output) = Command::new(&magick_path)
+            .args(["identify", "-format", "%n\n"])
+            .arg(pdf_path)
+            .output()
+        {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Some(line) = stdout.lines().next() {
+                    if let Ok(count) = line.trim().parse() {
+                        return Ok(count);
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback to lopdf
+    get_page_count_with_lopdf(pdf_path)
+}
+
+/// Get page count using lopdf (pure Rust fallback).
+fn get_page_count_with_lopdf(pdf_path: &Path) -> Result<usize> {
+    let doc = lopdf::Document::load(pdf_path).map_err(|e| ExtractError::ExtractionFailed {
+        page: 0,
+        reason: format!("Failed to load PDF with lopdf: {}", e),
+    })?;
+    Ok(doc.get_pages().len())
+}
+
+/// Check if ImageMagick is available in the system PATH.
+///
+/// On Windows, only checks for the 'magick' command since 'convert' is a
+/// system utility (FAT to NTFS converter).
+fn is_magick_available() -> bool {
+    resolve_tool_path(MAGICK_CMD, if cfg!(windows) { None } else { Some(CONVERT_CMD) }).is_some()
+}
+
+/// Check if pdftoppm (from Poppler utilities) is available.
+fn is_pdftoppm_available() -> bool {
+    resolve_tool_path(PDFTOPPM_CMD, None).is_some()
+}
 
 /// Image extraction error types
 #[derive(Debug, Error)]
@@ -311,7 +416,13 @@ impl MagickExtractor {
             let _ = std::fs::remove_file(test_file);
         }
 
-        let mut cmd = Command::new("magick");
+        // Resolve ImageMagick path (magick on all platforms, convert as fallback on Unix)
+        let magick_path = resolve_tool_path(MAGICK_CMD, if cfg!(windows) { None } else { Some(CONVERT_CMD) })
+            .ok_or_else(|| ExtractError::ExternalToolError(
+                "ImageMagick not found in PATH. Please install ImageMagick 7 (https://imagemagick.org)".to_string()
+            ))?;
+
+        let mut cmd = Command::new(&magick_path);
         cmd.arg("-density").arg(options.dpi.to_string());
 
         // Input file with page index (must come before image operations in ImageMagick 7)
@@ -415,44 +526,7 @@ impl MagickExtractor {
 
     /// Get the number of pages in a PDF
     fn get_page_count(pdf_path: &Path) -> Result<usize> {
-        // Try using pdfinfo first
-        if let Ok(output) = Command::new("pdfinfo").arg(pdf_path).output() {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    if line.starts_with("Pages:") {
-                        if let Some(count_str) = line.split(':').nth(1) {
-                            if let Ok(count) = count_str.trim().parse() {
-                                return Ok(count);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Fallback: use ImageMagick identify
-        let output = Command::new("magick")
-            .args(["identify", "-format", "%n\n"])
-            .arg(pdf_path)
-            .output()?;
-
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if let Some(line) = stdout.lines().next() {
-                if let Ok(count) = line.trim().parse() {
-                    return Ok(count);
-                }
-            }
-        }
-
-        // Last resort: try lopdf
-        let doc = lopdf::Document::load(pdf_path).map_err(|e| ExtractError::ExtractionFailed {
-            page: 0,
-            reason: e.to_string(),
-        })?;
-
-        Ok(doc.get_pages().len())
+        get_pdf_page_count(pdf_path)
     }
 }
 
@@ -657,12 +731,12 @@ impl LopdfExtractor {
 
     /// Check if ImageMagick is available
     pub fn magick_available() -> bool {
-        which::which("magick").is_ok() || which::which("convert").is_ok()
+        is_magick_available()
     }
 
     /// Check if pdftoppm (poppler-utils) is available
     pub fn pdftoppm_available() -> bool {
-        which::which("pdftoppm").is_ok()
+        is_pdftoppm_available()
     }
 
     /// Extract using best available method
@@ -715,7 +789,13 @@ impl PopplerExtractor {
         let output_stem = output_path.with_extension("");
         let output_stem_str = output_stem.to_string_lossy();
 
-        let mut cmd = Command::new("pdftoppm");
+        // Resolve pdftoppm path
+        let pdftoppm_path = resolve_tool_path(PDFTOPPM_CMD, None)
+            .ok_or_else(|| ExtractError::ExternalToolError(
+                "pdftoppm not found in PATH. Please install Poppler utilities (https://poppler.freedesktop.org)".to_string()
+            ))?;
+
+        let mut cmd = Command::new(&pdftoppm_path);
         cmd.arg("-r").arg(options.dpi.to_string()); // Resolution
         cmd.arg("-f").arg(page_num.to_string()); // First page
         cmd.arg("-l").arg(page_num.to_string()); // Last page
@@ -825,29 +905,9 @@ impl PopplerExtractor {
         Ok(results)
     }
 
-    /// Get page count using pdfinfo
+    /// Get page count using available tools
     fn get_page_count(pdf_path: &Path) -> Result<usize> {
-        let output = Command::new("pdfinfo").arg(pdf_path).output()?;
-
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                if line.starts_with("Pages:") {
-                    if let Some(count_str) = line.split_whitespace().nth(1) {
-                        if let Ok(count) = count_str.parse::<usize>() {
-                            return Ok(count);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Fallback: try lopdf
-        let doc = lopdf::Document::load(pdf_path).map_err(|e| ExtractError::ExtractionFailed {
-            page: 0,
-            reason: format!("Failed to load PDF: {}", e),
-        })?;
-        Ok(doc.get_pages().len())
+        get_pdf_page_count(pdf_path)
     }
 }
 
