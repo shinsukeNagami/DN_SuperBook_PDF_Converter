@@ -97,7 +97,9 @@ cd DN_SuperBook_PDF_Converter_Linux/superbook-pdf
 cargo build --release --features web
 ```
 
-### 3. AI機能のセットアップ (オプション)
+### 3. AI機能のセットアップ (ネイティブ実行時)
+
+> **Note:** Docker/Podman を使う場合はこの手順は不要です。コンテナにはAI機能がプリインストールされています。
 
 AI超解像 (RealESRGAN) と OCR (YomiToku) を使いたい場合は、Python環境をセットアップします:
 
@@ -115,15 +117,41 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
 ```
 
-実行時に環境変数を設定してください:
+**重要:** 実行時に `SUPERBOOK_VENV` 環境変数を設定してください:
 
 ```bash
+# 一時的に設定
 export SUPERBOOK_VENV=/path/to/ai_bridge/.venv
+
+# または .bashrc に追加
+echo 'export SUPERBOOK_VENV=/path/to/ai_bridge/.venv' >> ~/.bashrc
 ```
 
-### 4. Docker/Podman で実行 (オプション)
+この環境変数が設定されていないと、AI機能 (超解像・OCR) は動作しません。
 
-環境構築が面倒な場合は、コンテナを使うと楽です:
+### 4. Docker/Podman で実行 (推奨)
+
+環境構築が面倒な場合は、コンテナを使うのが一番簡単です。GPU・AI機能がすべてセットアップ済みです。
+
+**ワンライナーでPDF変換:**
+
+```bash
+# Docker (GPU使用)
+docker run --rm --gpus all \
+  -v $(pwd)/input:/data/input:ro \
+  -v $(pwd)/output:/data/output:rw \
+  ghcr.io/clearclown/superbook-pdf:latest \
+  convert /data/input/book.pdf -o /data/output/ --advanced --ocr
+
+# Podman (GPU使用)
+podman run --rm --device nvidia.com/gpu=all \
+  -v $(pwd)/input:/data/input:ro \
+  -v $(pwd)/output:/data/output:rw \
+  ghcr.io/clearclown/superbook-pdf:latest \
+  convert /data/input/book.pdf -o /data/output/ --advanced --ocr
+```
+
+**Web UI を起動:**
 
 ```bash
 cd superbook-pdf
@@ -136,6 +164,13 @@ podman compose up -d
 ```
 
 ブラウザで http://localhost:8080 を開けば使えます。
+
+**ローカルでイメージをビルド:**
+
+```bash
+cd superbook-pdf
+podman build -t superbook-pdf .
+```
 
 ---
 

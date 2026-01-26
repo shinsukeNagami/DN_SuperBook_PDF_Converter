@@ -36,6 +36,7 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - SUPERBOOK_VENV=/app/ai_venv
       - SUPERBOOK_BIND=0.0.0.0
       - SUPERBOOK_PORT=8080
       - SUPERBOOK_WORK_DIR=/data/work

@@ -89,7 +89,7 @@ RUN mkdir -p /data/input /data/output /data/work
 # Environment
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
-ENV AI_PYTHON=$AI_VENV/bin/python
+ENV SUPERBOOK_VENV=$AI_VENV
 
 # API server configuration
 ENV SUPERBOOK_BIND=0.0.0.0
