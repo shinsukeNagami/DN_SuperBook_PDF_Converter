@@ -155,7 +155,8 @@ impl WebServer {
         let listener = tokio::net::TcpListener::bind(addr).await?;
 
         // Run server with graceful shutdown
-        axum::serve(listener, router)
+        // Use into_make_service_with_connect_info to enable ConnectInfo extraction for rate limiting
+        axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
             .with_graceful_shutdown(wait_for_shutdown_signal())
             .await?;
 

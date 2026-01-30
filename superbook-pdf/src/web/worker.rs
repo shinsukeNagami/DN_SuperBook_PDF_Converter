@@ -12,6 +12,10 @@ use super::job::{ConvertOptions, JobQueue, JobStatus, Progress};
 use super::websocket::WsBroadcaster;
 use crate::pipeline::{PdfPipeline, PipelineConfig, ProgressCallback};
 
+/// Total number of pipeline processing steps
+/// This should match the actual pipeline step count
+pub const PIPELINE_TOTAL_STEPS: u32 = 13;
+
 /// Worker message types
 #[derive(Debug)]
 pub enum WorkerMessage {
@@ -40,8 +44,9 @@ impl WebProgressCallback {
         Self {
             job_id,
             queue,
-            current_step: AtomicU32::new(1),
-            total_steps: AtomicU32::new(13),
+            // Start at 0, incremented before use in on_step_start
+            current_step: AtomicU32::new(0),
+            total_steps: AtomicU32::new(PIPELINE_TOTAL_STEPS),
             step_progress: AtomicUsize::new(0),
             step_total: AtomicUsize::new(0),
         }
@@ -50,7 +55,8 @@ impl WebProgressCallback {
 
 impl ProgressCallback for WebProgressCallback {
     fn on_step_start(&self, step: &str) {
-        let current = self.current_step.fetch_add(1, Ordering::Relaxed);
+        // Increment first, then use (so step 1 is the first step)
+        let current = self.current_step.fetch_add(1, Ordering::Relaxed) + 1;
         let total = self.total_steps.load(Ordering::Relaxed);
         self.step_progress.store(0, Ordering::Relaxed);
         self.step_total.store(0, Ordering::Relaxed);
@@ -142,29 +148,44 @@ impl JobWorker {
 
     /// Process a single job with actual pipeline
     pub async fn process_job(&self, job_id: Uuid, input_path: PathBuf, options: ConvertOptions) {
-        // Mark job as processing
-        self.queue.update(job_id, |job| {
-            job.start();
-            job.update_progress(Progress::new(1, 13, "Starting"));
-        });
-
-        // Broadcast status change via WebSocket
-        self.broadcaster
-            .broadcast_status_change(job_id, JobStatus::Queued, JobStatus::Processing)
-            .await;
-        self.broadcaster
-            .broadcast_progress(job_id, 1, 13, "Starting")
-            .await;
-
-        // Check if job was cancelled
+        // Check if job was cancelled BEFORE starting (prevents race condition)
         if let Some(job) = self.queue.get(job_id) {
             if job.status == JobStatus::Cancelled {
                 return;
             }
         }
 
-        // Create output directory
-        let output_dir = self.work_dir.join("output");
+        // Mark job as processing
+        self.queue.update(job_id, |job| {
+            // Double-check cancellation status inside update to prevent race
+            if job.status != JobStatus::Cancelled {
+                job.start();
+                // Don't set "Starting" progress here - let pipeline callbacks handle it
+            }
+        });
+
+        // Verify job was actually started (not cancelled)
+        if let Some(job) = self.queue.get(job_id) {
+            if job.status == JobStatus::Cancelled {
+                return;
+            }
+        }
+
+        // Broadcast status change via WebSocket
+        self.broadcaster
+            .broadcast_status_change(job_id, JobStatus::Queued, JobStatus::Processing)
+            .await;
+
+        // Check if job was cancelled again (after broadcast)
+        if let Some(job) = self.queue.get(job_id) {
+            if job.status == JobStatus::Cancelled {
+                return;
+            }
+        }
+
+        // Create job-specific output directory to prevent filename collisions
+        // Each job gets its own subdirectory under output/
+        let output_dir = self.work_dir.join("output").join(job_id.to_string());
         if let Err(e) = std::fs::create_dir_all(&output_dir) {
             let error_msg = format!("Failed to create output directory: {}", e);
             self.queue.update(job_id, |job| {
@@ -305,9 +326,12 @@ impl WorkerPool {
     }
 
     /// Shutdown all workers
+    /// Sends shutdown message to each worker to ensure all exit properly
     pub async fn shutdown(&self) {
-        // Send shutdown message (workers will exit after current job)
-        let _ = self.sender.send(WorkerMessage::Shutdown).await;
+        // Send shutdown message to each worker
+        for _ in 0..self.worker_count {
+            let _ = self.sender.send(WorkerMessage::Shutdown).await;
+        }
     }
 
     /// Get the number of workers

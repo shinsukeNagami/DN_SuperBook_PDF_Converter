@@ -154,6 +154,22 @@ impl Job {
         }
     }
 
+    /// Create a new job with a specific ID (for streaming uploads)
+    pub fn with_id(id: Uuid, input_filename: impl Into<String>, options: ConvertOptions) -> Self {
+        Self {
+            id,
+            status: JobStatus::Queued,
+            options,
+            progress: None,
+            input_filename: input_filename.into(),
+            output_path: None,
+            created_at: Utc::now(),
+            started_at: None,
+            completed_at: None,
+            error: None,
+        }
+    }
+
     /// Mark job as processing
     pub fn start(&mut self) {
         self.status = JobStatus::Processing;

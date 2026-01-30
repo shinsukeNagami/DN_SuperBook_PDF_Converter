@@ -24,7 +24,10 @@ use super::websocket::{ws_job_handler, WsBroadcaster};
 use super::worker::WorkerPool;
 
 use std::net::IpAddr;
-use std::path::PathBuf;
+use std::path::{Path as StdPath, PathBuf};
+use tokio::io::AsyncWriteExt;
+use tokio_util::io::ReaderStream;
+use axum::body::Body;
 
 /// Embedded static files
 #[derive(RustEmbed)]
@@ -289,14 +292,15 @@ fn get_memory_usage_mb() -> u64 {
 }
 
 /// Get rate limit status
+/// Uses peek() to avoid consuming a token when checking status
 async fn get_rate_limit_status(
     State(state): State<Arc<AppState>>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
 ) -> Json<RateLimitStatus> {
     let ip = addr.ip();
 
-    // Check current status for this IP
-    let (remaining, reset_at) = match state.rate_limiter.check(ip) {
+    // Peek at current status for this IP without consuming a token
+    let (remaining, reset_at) = match state.rate_limiter.peek(ip) {
         RateLimitResult::Allowed { remaining, reset_at } => (remaining, reset_at),
         RateLimitResult::Limited { retry_after } => {
             use std::time::{SystemTime, UNIX_EPOCH};
@@ -424,6 +428,16 @@ async fn get_job_history(
     }))
 }
 
+/// Sanitize filename to prevent path traversal attacks
+fn sanitize_filename(filename: &str) -> String {
+    // Extract only the base filename, removing any path components
+    StdPath::new(filename)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("upload.pdf")
+        .to_string()
+}
+
 /// Retry a failed job
 async fn retry_job(
     State(state): State<Arc<AppState>>,
@@ -443,25 +457,47 @@ async fn retry_job(
         )));
     }
 
+    // Sanitize filename to prevent path traversal
+    let safe_filename = sanitize_filename(&job.input_filename);
+
     // Create a new job based on the failed one
-    let new_job = Job::new(&job.input_filename, job.options.clone());
+    let new_job = Job::new(&safe_filename, job.options.clone());
     let new_job_id = new_job.id;
 
     // Submit the new job
-    state.queue.submit(new_job);
+    state.queue.submit(new_job.clone());
 
-    // Try to find the original input file and resubmit
-    let input_path = state.upload_dir.join(format!("{}_{}", id, job.input_filename));
-    if input_path.exists() {
-        // Copy to new job path
-        let new_input_path = state.upload_dir.join(format!("{}_{}", new_job_id, job.input_filename));
-        if std::fs::copy(&input_path, &new_input_path).is_ok() {
-            if let Err(e) = state.worker_pool.submit(new_job_id, new_input_path, job.options.clone()).await {
-                state.queue.update(new_job_id, |job| {
-                    job.fail(format!("Failed to start processing: {}", e));
-                });
-            }
-        }
+    // Try to find the original input file and resubmit (async check)
+    let input_path = state.upload_dir.join(format!("{}_{}", id, safe_filename));
+    if tokio::fs::metadata(&input_path).await.is_err() {
+        // Original file not found - mark job as failed
+        state.queue.update(new_job_id, |job| {
+            job.fail("Original input file not found for retry".to_string());
+        });
+        return Ok(Json(RetryResponse::error(
+            new_job_id,
+            "Original input file not found".to_string(),
+        )));
+    }
+
+    // Copy to new job path (async)
+    let new_input_path = state.upload_dir.join(format!("{}_{}", new_job_id, safe_filename));
+    if let Err(e) = tokio::fs::copy(&input_path, &new_input_path).await {
+        // Copy failed - mark job as failed
+        state.queue.update(new_job_id, |job| {
+            job.fail(format!("Failed to copy input file: {}", e));
+        });
+        return Ok(Json(RetryResponse::error(
+            new_job_id,
+            format!("Failed to copy input file: {}", e),
+        )));
+    }
+
+    // Start processing
+    if let Err(e) = state.worker_pool.submit(new_job_id, new_input_path, job.options.clone()).await {
+        state.queue.update(new_job_id, |job| {
+            job.fail(format!("Failed to start processing: {}", e));
+        });
     }
 
     Ok(Json(RetryResponse::success(new_job_id)))
@@ -476,15 +512,17 @@ pub struct UploadResponse {
 }
 
 /// Upload and convert a PDF
+/// Uses async streaming write to reduce memory usage for large files
 async fn upload_and_convert(
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<UploadResponse>), AppError> {
     let mut filename = String::new();
     let mut options = ConvertOptions::default();
-    let mut file_data: Option<Vec<u8>> = None;
+    let mut input_path: Option<PathBuf> = None;
+    let mut job_id: Option<Uuid> = None;
 
-    while let Ok(Some(field)) = multipart.next_field().await {
+    while let Ok(Some(mut field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
 
         match name.as_str() {
@@ -493,9 +531,33 @@ async fn upload_and_convert(
                     .file_name()
                     .unwrap_or("upload.pdf")
                     .to_string();
-                if let Ok(data) = field.bytes().await {
-                    file_data = Some(data.to_vec());
+
+                // Sanitize filename to prevent path traversal attacks
+                let safe_filename = sanitize_filename(&filename);
+                filename = safe_filename.clone();
+
+                // Generate job ID early for file path
+                let id = Uuid::new_v4();
+                job_id = Some(id);
+
+                // Create file path and open file for async streaming write
+                let path = state.upload_dir.join(format!("{}_{}", id, safe_filename));
+                let mut file = tokio::fs::File::create(&path).await.map_err(|e| {
+                    AppError::Internal(format!("Failed to create upload file: {}", e))
+                })?;
+
+                // Stream chunks to file asynchronously to reduce memory usage
+                while let Ok(Some(chunk)) = field.chunk().await {
+                    file.write_all(&chunk).await.map_err(|e| {
+                        AppError::Internal(format!("Failed to write upload chunk: {}", e))
+                    })?;
                 }
+
+                file.flush().await.map_err(|e| {
+                    AppError::Internal(format!("Failed to flush upload file: {}", e))
+                })?;
+
+                input_path = Some(path);
             }
             "options" => {
                 if let Ok(text) = field.text().await {
@@ -512,18 +574,12 @@ async fn upload_and_convert(
         return Err(AppError::BadRequest("No file uploaded".to_string()));
     }
 
-    let file_data = file_data.ok_or_else(|| AppError::BadRequest("No file data".to_string()))?;
+    let job_id = job_id.ok_or_else(|| AppError::BadRequest("No file data".to_string()))?;
+    let input_path = input_path.ok_or_else(|| AppError::BadRequest("No file data".to_string()))?;
 
-    // Create job
-    let job = Job::new(&filename, options.clone());
-    let job_id = job.id;
+    // Create job with sanitized filename
+    let job = Job::with_id(job_id, &filename, options.clone());
     let created_at = job.created_at.to_rfc3339();
-
-    // Save uploaded file
-    let input_path = state.upload_dir.join(format!("{}_{}", job_id, filename));
-    std::fs::write(&input_path, &file_data).map_err(|e| {
-        AppError::Internal(format!("Failed to save uploaded file: {}", e))
-    })?;
 
     // Submit job to queue
     state.queue.submit(job);
@@ -570,31 +626,7 @@ async fn cancel_job(
         .ok_or(AppError::NotFound(format!("Job {} not found", id)))
 }
 
-/// Download result response struct
-#[derive(Debug)]
-pub struct PdfDownload {
-    data: Vec<u8>,
-    filename: String,
-}
-
-impl IntoResponse for PdfDownload {
-    fn into_response(self) -> axum::response::Response {
-        (
-            StatusCode::OK,
-            [
-                ("Content-Type", "application/pdf"),
-                (
-                    "Content-Disposition",
-                    format!("attachment; filename=\"{}\"", self.filename).as_str(),
-                ),
-            ],
-            self.data,
-        )
-            .into_response()
-    }
-}
-
-/// Download conversion result
+/// Download conversion result with streaming
 async fn download_result(
     State(state): State<Arc<AppState>>,
     Path(id): Path<Uuid>,
@@ -607,9 +639,16 @@ async fn download_result(
     match job.status {
         super::job::JobStatus::Completed => {
             if let Some(path) = &job.output_path {
-                let data = std::fs::read(path).map_err(|e| {
-                    AppError::Internal(format!("Failed to read output file: {}", e))
+                // Open file asynchronously for streaming
+                let file = tokio::fs::File::open(path).await.map_err(|e| {
+                    AppError::Internal(format!("Failed to open output file: {}", e))
                 })?;
+
+                // Get file metadata for Content-Length
+                let metadata = file.metadata().await.map_err(|e| {
+                    AppError::Internal(format!("Failed to get file metadata: {}", e))
+                })?;
+                let file_size = metadata.len();
 
                 let filename = path
                     .file_name()
@@ -617,7 +656,23 @@ async fn download_result(
                     .unwrap_or("output.pdf")
                     .to_string();
 
-                Ok(PdfDownload { data, filename })
+                // Create streaming body from file
+                let stream = ReaderStream::new(file);
+                let body = Body::from_stream(stream);
+
+                // Build response with proper headers
+                let response = axum::response::Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, "application/pdf")
+                    .header(header::CONTENT_LENGTH, file_size)
+                    .header(
+                        header::CONTENT_DISPOSITION,
+                        format!("attachment; filename=\"{}\"", filename),
+                    )
+                    .body(body)
+                    .map_err(|e| AppError::Internal(format!("Failed to build response: {}", e)))?;
+
+                Ok(response)
             } else {
                 Err(AppError::Internal("Output file not found".to_string()))
             }
@@ -708,29 +763,23 @@ pub struct BatchCancelResponse {
 }
 
 /// Create a new batch job
+/// Uses async streaming write to reduce memory usage for large files
+/// First pass collects options, second pass processes files
 async fn create_batch(
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<BatchResponse>), AppError> {
-    let mut filenames: Vec<String> = Vec::new();
-    let mut file_data_list: Vec<(String, Vec<u8>)> = Vec::new();
     let mut options = ConvertOptions::default();
     let mut priority = Priority::default();
 
-    while let Ok(Some(field)) = multipart.next_field().await {
+    // Collect pending files first (store file data temporarily)
+    let mut pending_files: Vec<(String, PathBuf)> = Vec::new();
+
+    // First pass: collect options and save files
+    while let Ok(Some(mut field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
 
         match name.as_str() {
-            "files[]" | "files" => {
-                let filename = field
-                    .file_name()
-                    .unwrap_or("upload.pdf")
-                    .to_string();
-                if let Ok(data) = field.bytes().await {
-                    file_data_list.push((filename.clone(), data.to_vec()));
-                    filenames.push(filename);
-                }
-            }
             "options" => {
                 if let Ok(text) = field.text().await {
                     if let Ok(parsed) = serde_json::from_str::<BatchRequest>(&text) {
@@ -741,43 +790,75 @@ async fn create_batch(
                     }
                 }
             }
+            "files[]" | "files" => {
+                let filename = field
+                    .file_name()
+                    .unwrap_or("upload.pdf")
+                    .to_string();
+                // Sanitize filename to prevent path traversal
+                let safe_filename = sanitize_filename(&filename);
+
+                // Generate temporary job ID for file path
+                let temp_id = Uuid::new_v4();
+
+                // Create file path and open file for async streaming write
+                let input_path = state.upload_dir.join(format!("{}_{}", temp_id, safe_filename));
+                let mut file = tokio::fs::File::create(&input_path).await.map_err(|e| {
+                    AppError::Internal(format!("Failed to create upload file: {}", e))
+                })?;
+
+                // Stream chunks to file asynchronously to reduce memory usage
+                while let Ok(Some(chunk)) = field.chunk().await {
+                    file.write_all(&chunk).await.map_err(|e| {
+                        AppError::Internal(format!("Failed to write upload chunk: {}", e))
+                    })?;
+                }
+
+                file.flush().await.map_err(|e| {
+                    AppError::Internal(format!("Failed to flush upload file: {}", e))
+                })?;
+
+                pending_files.push((safe_filename, input_path));
+            }
             _ => {}
         }
     }
 
-    if filenames.is_empty() {
+    if pending_files.is_empty() {
         return Err(AppError::BadRequest("No files uploaded".to_string()));
     }
 
-    // Create batch job
+    // Create batch job with parsed options
     let mut batch = BatchJob::new(options.clone(), priority);
     let batch_id = batch.id;
     let created_at = batch.created_at.to_rfc3339();
+    let job_count = pending_files.len();
 
-    // Create individual jobs and save files
-    for (filename, data) in file_data_list {
-        let job = Job::new(&filename, options.clone());
-        let job_id = job.id;
+    // Second pass: create jobs with correct options
+    for (safe_filename, input_path) in pending_files {
+        let job_id = Uuid::new_v4();
 
-        // Save uploaded file
-        let input_path = state.upload_dir.join(format!("{}_{}", job_id, filename));
-        std::fs::write(&input_path, &data).map_err(|e| {
-            AppError::Internal(format!("Failed to save uploaded file: {}", e))
-        })?;
+        // Rename file to use actual job ID (async)
+        let new_input_path = state.upload_dir.join(format!("{}_{}", job_id, safe_filename));
+        if input_path != new_input_path {
+            tokio::fs::rename(&input_path, &new_input_path).await.map_err(|e| {
+                AppError::Internal(format!("Failed to rename upload file: {}", e))
+            })?;
+        }
 
-        // Submit job
+        // Create and submit job with correct options
+        let job = Job::with_id(job_id, &safe_filename, options.clone());
         state.queue.submit(job);
         batch.add_job(job_id);
 
         // Start processing
-        if let Err(e) = state.worker_pool.submit(job_id, input_path, options.clone()).await {
+        if let Err(e) = state.worker_pool.submit(job_id, new_input_path, options.clone()).await {
             state.queue.update(job_id, |job| {
                 job.fail(format!("Failed to start processing: {}", e));
             });
         }
     }
 
-    let job_count = batch.job_count();
     batch.start();
 
     // Submit batch to queue

@@ -217,6 +217,43 @@ impl RateLimiter {
         self.rejected_requests.load(Ordering::Relaxed)
     }
 
+    /// Peek at the current rate limit status without consuming a token
+    /// Use this for status endpoints to avoid consuming tokens
+    pub fn peek(&self, ip: IpAddr) -> RateLimitResult {
+        // Check if rate limiting is disabled
+        if !self.config.enabled {
+            return RateLimitResult::Allowed {
+                remaining: u32::MAX,
+                reset_at: 0,
+            };
+        }
+
+        // Check whitelist
+        if self.config.whitelist.contains(&ip) {
+            return RateLimitResult::Allowed {
+                remaining: u32::MAX,
+                reset_at: 0,
+            };
+        }
+
+        // Get bucket for this IP (create if doesn't exist, but don't consume)
+        let mut bucket = self.buckets.entry(ip).or_insert_with(|| {
+            let refill_rate = self.config.requests_per_minute as f64 / 60.0;
+            TokenBucket::new(self.config.burst_size as f64, refill_rate)
+        });
+
+        // Just peek at remaining tokens without consuming
+        let remaining = bucket.tokens_remaining() as u32;
+        let reset_at = self.calculate_reset_time();
+
+        if remaining >= 1 {
+            RateLimitResult::Allowed { remaining, reset_at }
+        } else {
+            let retry_after = bucket.time_until_refill().as_secs().max(1);
+            RateLimitResult::Limited { retry_after }
+        }
+    }
+
     /// Check if rate limiting is enabled
     pub fn is_enabled(&self) -> bool {
         self.config.enabled
@@ -532,5 +569,58 @@ mod tests {
 
         assert_eq!(limiter.total_requests(), 3);
         assert_eq!(limiter.rejected_requests(), 1);
+    }
+
+    // RATE-013: Peek does not consume tokens
+    #[test]
+    fn test_rate_limit_peek_does_not_consume() {
+        let config = RateLimitConfig {
+            burst_size: 2,
+            ..Default::default()
+        };
+        let limiter = RateLimiter::new(config);
+        let ip: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+
+        // Peek multiple times - should not consume tokens
+        for _ in 0..10 {
+            let result = limiter.peek(ip);
+            assert!(matches!(result, RateLimitResult::Allowed { remaining: 2, .. }));
+        }
+
+        // Now consume tokens
+        assert!(matches!(limiter.check(ip), RateLimitResult::Allowed { remaining: 1, .. }));
+        assert!(matches!(limiter.check(ip), RateLimitResult::Allowed { remaining: 0, .. }));
+        assert!(matches!(limiter.check(ip), RateLimitResult::Limited { .. }));
+    }
+
+    // RATE-014: Peek respects whitelist
+    #[test]
+    fn test_rate_limit_peek_whitelist() {
+        let whitelisted_ip: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let config = RateLimitConfig {
+            burst_size: 1,
+            whitelist: vec![whitelisted_ip],
+            ..Default::default()
+        };
+        let limiter = RateLimiter::new(config);
+
+        // Whitelisted IP peek always shows unlimited
+        let result = limiter.peek(whitelisted_ip);
+        assert!(matches!(result, RateLimitResult::Allowed { remaining: u32::MAX, .. }));
+    }
+
+    // RATE-015: Peek respects disabled state
+    #[test]
+    fn test_rate_limit_peek_disabled() {
+        let config = RateLimitConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        let limiter = RateLimiter::new(config);
+        let ip: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+
+        // Disabled limiter peek shows unlimited
+        let result = limiter.peek(ip);
+        assert!(matches!(result, RateLimitResult::Allowed { remaining: u32::MAX, .. }));
     }
 }
